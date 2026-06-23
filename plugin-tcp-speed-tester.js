@@ -26,7 +26,6 @@ const DEFAULT_SETTINGS = {
   speedUrl: DEFAULT_SPEED_URL,
   delayTimeout: 5000,
   speedTimeout: 20000,
-  concurrencyLimit: 3,
   speedBytes: 25000000,
   historyLimit: 200,
   bypassTun: true,
@@ -149,7 +148,6 @@ const normalizeSettings = (settings) => ({
   speedUrl: String(settings?.speedUrl || DEFAULT_SPEED_URL).trim(),
   delayTimeout: normalizePositiveInteger(settings?.delayTimeout, DEFAULT_SETTINGS.delayTimeout, 1000, 60000),
   speedTimeout: normalizePositiveInteger(settings?.speedTimeout, DEFAULT_SETTINGS.speedTimeout, 3000, 120000),
-  concurrencyLimit: normalizePositiveInteger(settings?.concurrencyLimit, DEFAULT_SETTINGS.concurrencyLimit, 1, 20),
   speedBytes: normalizePositiveInteger(settings?.speedBytes, DEFAULT_SETTINGS.speedBytes, 1024, 500000000),
   historyLimit: normalizePositiveInteger(settings?.historyLimit, DEFAULT_SETTINGS.historyLimit, 20, 1000),
   bypassTun: settings?.bypassTun !== false,
@@ -201,8 +199,6 @@ const openManager = async () => {
           <Input v-model="settings.speedTimeout" type="number" editable />
           <div class="font-bold text-13">测速字节数</div>
           <Input v-model="settings.speedBytes" type="number" editable />
-          <div class="font-bold text-13">并发数</div>
-          <Input v-model="settings.concurrencyLimit" type="number" editable />
           <div class="font-bold text-13">历史保留</div>
           <Input v-model="settings.historyLimit" type="number" editable />
           <div class="font-bold text-13">旁路当前 TUN</div>
@@ -463,13 +459,12 @@ const executeTests = async (sourceConfig, selectedNodes, settings) => {
   const msg = Plugins.message.info(`TCP 测试中 0 / ${total}`, 999999)
   const results = []
   try {
-    const { run } = Plugins.createAsyncPool(settings.concurrencyLimit, selectedNodes, async (node) => {
+    for (const node of selectedNodes) {
       const result = await testSingleNode(runtime, node, settings)
       results.push(result)
       completed += 1
       msg.update?.(`TCP 测试中 ${completed} / ${total}`)
-    })
-    await run()
+    }
     msg.success?.(`TCP 测试完成 ${completed} / ${total}`)
     await Plugins.sleep(1200)
     return results.sort((a, b) => {
@@ -516,10 +511,15 @@ const startRuntime = async (sourceConfig, selectedNodes, settings) => {
 }
 
 const createRuntimeConfig = (sourceConfig, selectedNodes, controller, secret, portMap, bindInterface) => {
-  const rules = selectedNodes.map((node) => ({
-    inbound: `test-http-${safeTag(node.tag)}`,
+  const nodeBindings = selectedNodes.map((node, index) => ({
+    node,
+    inboundTag: createInboundTag(node, index),
+    port: portMap.get(node.tag)
+  }))
+  const rules = nodeBindings.map((binding) => ({
+    inbound: binding.inboundTag,
     action: 'route',
-    outbound: node.tag
+    outbound: binding.node.tag
   }))
   const outbounds = collectRuntimeOutbounds(sourceConfig, selectedNodes, bindInterface).concat([
     {
@@ -534,11 +534,11 @@ const createRuntimeConfig = (sourceConfig, selectedNodes, controller, secret, po
   return {
     ...clone(BASE_CONFIG),
     dns: createRuntimeDns(bindInterface),
-    inbounds: selectedNodes.map((node) => ({
+    inbounds: nodeBindings.map((binding) => ({
       type: 'http',
-      tag: `test-http-${safeTag(node.tag)}`,
+      tag: binding.inboundTag,
       listen: '127.0.0.1',
-      listen_port: portMap.get(node.tag)
+      listen_port: binding.port
     })),
     outbounds,
     route: {
@@ -554,6 +554,10 @@ const createRuntimeConfig = (sourceConfig, selectedNodes, controller, secret, po
       }
     }
   }
+}
+
+const createInboundTag = (node, index) => {
+  return `test-http-${index + 1}-${safeTag(node.tag)}`
 }
 
 const createRuntimeDns = (bindInterface) => {
