@@ -138,7 +138,7 @@
   {
     "id": "plugin-tcp-speed-tester",
     "name": "TCP 延迟与测速",
-    "version": "v1.0.5",
+    "version": "v1.0.6",
     "group": "Extensions",
     "description": "选择节点或策略组执行 TCP 连接延迟与下载测速，支持旁路当前 TUN，并持久化历史结果用于多次对比。 作者：SenreySong",
     "tags": [

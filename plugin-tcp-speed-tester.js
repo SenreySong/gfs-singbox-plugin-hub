@@ -283,6 +283,7 @@ const openManager = async () => {
                 <th class="text-left p-6">TCP 延迟</th>
                 <th class="text-left p-6">测速</th>
                 <th class="text-left p-6">下载量</th>
+                <th class="text-left p-6">状态</th>
                 <th class="text-left p-6">结果</th>
               </tr>
             </thead>
@@ -290,13 +291,14 @@ const openManager = async () => {
               <tr v-for="item in runningResults" :key="item.id" style="border-bottom: 1px solid #e2e8f0;">
                 <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
                 <td class="p-6">{{ item.type }}</td>
-                <td class="p-6">{{ item.tcpDelayMs > 0 ? item.tcpDelayMs + ' ms' : '失败' }}</td>
-                <td class="p-6">{{ item.speedMbps > 0 ? item.speedMbps + ' Mbps' : '失败' }}</td>
+                <td class="p-6">{{ formatRunningDelay(item) }}</td>
+                <td class="p-6">{{ formatRunningSpeed(item) }}</td>
                 <td class="p-6">{{ formatBytes(item.bytesRead) }}</td>
-                <td class="p-6">{{ item.error || '成功' }}</td>
+                <td class="p-6">{{ item.status || '等待中' }}</td>
+                <td class="p-6">{{ formatRunningResult(item) }}</td>
               </tr>
               <tr v-if="runningResults.length === 0">
-                <td class="p-8 text-center opacity-70" colspan="6">等待第一个节点结果</td>
+                <td class="p-8 text-center opacity-70" colspan="7">等待开始测速</td>
               </tr>
             </tbody>
           </table>
@@ -373,7 +375,7 @@ const openManager = async () => {
           return
         }
         running.value = true
-        runningResults.value = []
+        runningResults.value = createPendingResults(preview.value.selectedNodes)
         progress.value = {
           text: '准备测速',
           detail: `${preview.value.selectedNodes.length} 个节点`
@@ -383,8 +385,14 @@ const openManager = async () => {
             onStatus(text, detail = '') {
               progress.value = { text, detail }
             },
+            onNodeStatus(tag, status) {
+              runningResults.value = updateRunningResult(runningResults.value, tag, { status })
+            },
+            onResultPatch(tag, patch) {
+              runningResults.value = updateRunningResult(runningResults.value, tag, patch)
+            },
             async onResult(result) {
-              runningResults.value = runningResults.value.concat([result])
+              runningResults.value = updateRunningResult(runningResults.value, result.tag, { ...result, status: result.error ? '失败' : '完成' })
               history.value = trimHistory([result].concat(history.value), settings.value)
               await saveHistory(history.value, settings.value)
               getState().history.value = history.value
@@ -433,7 +441,10 @@ const openManager = async () => {
         runTests,
         clearHistory,
         formatTime,
-        formatBytes
+        formatBytes,
+        formatRunningDelay,
+        formatRunningSpeed,
+        formatRunningResult
       }
     }
   }
@@ -529,6 +540,25 @@ const resolveSelectedNodes = (nodes, groups, settings) => {
   return Array.from(selected).map((tag) => nodeMap.get(tag)).filter(Boolean)
 }
 
+const createPendingResults = (nodes) => nodes.map((node) => ({
+  id: Plugins.sampleID(),
+  time: Date.now(),
+  tag: node.tag,
+  type: node.type,
+  delayUrl: '',
+  speedUrl: '',
+  tcpDelayMs: -1,
+  speedMbps: -1,
+  bytesRead: 0,
+  durationMs: 0,
+  status: '等待中',
+  error: ''
+}))
+
+const updateRunningResult = (results, tag, patch) => {
+  return results.map((item) => item.tag === tag ? { ...item, ...patch } : item)
+}
+
 const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}) => {
   let completed = 0
   const total = selectedNodes.length
@@ -540,6 +570,7 @@ const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}
     msg.update?.(`TCP 测试中 0 / ${total}`)
     for (const node of selectedNodes) {
       reporter.onStatus?.(`正在测试 ${node.tag}`, `${completed + 1} / ${total}`)
+      reporter.onNodeStatus?.(node.tag, '准备中')
       const result = await testSingleNode(runtime, node, settings, reporter)
       results.push(result)
       await reporter.onResult?.(result)
@@ -786,8 +817,11 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   }
   try {
     reporter.onStatus?.(`正在测试 ${node.tag}`, 'TCP 延迟')
+    reporter.onNodeStatus?.(node.tag, 'TCP 延迟')
     const tcpDelayMs = await testTcpDelay(runtime, node.tag, settings)
+    reporter.onResultPatch?.(node.tag, { tcpDelayMs })
     reporter.onStatus?.(`正在测试 ${node.tag}`, `下载测速，延迟 ${tcpDelayMs} ms`)
+    reporter.onNodeStatus?.(node.tag, '下载测速')
     const speed = await testDownloadSpeed(getNodeProxyUrl(runtime, node.tag), settings)
     return {
       ...base,
@@ -797,6 +831,7 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
       durationMs: speed.durationMs
     }
   } catch (error) {
+    reporter.onNodeStatus?.(node.tag, '失败')
     return {
       ...base,
       error: String(error?.message || error)
@@ -918,6 +953,24 @@ const formatBytes = (bytes) => {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+const formatRunningDelay = (item) => {
+  if (item.tcpDelayMs > 0) return `${item.tcpDelayMs} ms`
+  if (item.status === '失败' || item.error) return '失败'
+  return '-'
+}
+
+const formatRunningSpeed = (item) => {
+  if (item.speedMbps > 0) return `${item.speedMbps} Mbps`
+  if (item.status === '失败' || item.error) return '失败'
+  return '-'
+}
+
+const formatRunningResult = (item) => {
+  if (item.error) return item.error
+  if (item.status === '完成') return '成功'
+  return '-'
 }
 
 const normalizePositiveInteger = (value, fallback, min, max) => {
