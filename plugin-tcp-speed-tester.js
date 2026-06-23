@@ -170,6 +170,8 @@ const openManager = async () => {
   const settings = ref(normalizeSettings(state.settings.value))
   const history = ref(await readHistory())
   const preview = ref(await buildPreviewContext(settings.value))
+  const progress = ref({ text: '就绪', detail: '' })
+  const runningResults = ref([])
   const running = ref(false)
 
   const component = {
@@ -264,6 +266,43 @@ const openManager = async () => {
         </div>
       </Card>
 
+      <Card v-if="running || runningResults.length > 0">
+        <div class="flex items-center justify-between mb-8">
+          <div>
+            <div class="font-bold text-14">当前进度</div>
+            <div class="text-12 opacity-70">{{ progress.text }}</div>
+          </div>
+          <div class="text-12 opacity-70">{{ progress.detail }}</div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-12" style="border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 1px solid #cbd5e1;">
+                <th class="text-left p-6">节点</th>
+                <th class="text-left p-6">类型</th>
+                <th class="text-left p-6">TCP 延迟</th>
+                <th class="text-left p-6">测速</th>
+                <th class="text-left p-6">下载量</th>
+                <th class="text-left p-6">结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in runningResults" :key="item.id" style="border-bottom: 1px solid #e2e8f0;">
+                <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
+                <td class="p-6">{{ item.type }}</td>
+                <td class="p-6">{{ item.tcpDelayMs > 0 ? item.tcpDelayMs + ' ms' : '失败' }}</td>
+                <td class="p-6">{{ item.speedMbps > 0 ? item.speedMbps + ' Mbps' : '失败' }}</td>
+                <td class="p-6">{{ formatBytes(item.bytesRead) }}</td>
+                <td class="p-6">{{ item.error || '成功' }}</td>
+              </tr>
+              <tr v-if="runningResults.length === 0">
+                <td class="p-8 text-center opacity-70" colspan="6">等待第一个节点结果</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
       <Card>
         <div class="flex items-center justify-between mb-8">
           <div class="font-bold text-14">历史结果</div>
@@ -302,32 +341,66 @@ const openManager = async () => {
     </div>
     `,
     setup() {
+      let saveTimer = null
+      const persistSettings = async () => {
+        const normalized = normalizeSettings(settings.value)
+        if (JSON.stringify(settings.value) !== JSON.stringify(normalized)) {
+          settings.value = normalized
+        }
+        getState().settings.value = settings.value
+        await saveSettings(settings.value)
+      }
+      const scheduleSettingsSave = () => {
+        if (saveTimer) clearTimeout(saveTimer)
+        saveTimer = setTimeout(() => {
+          void persistSettings().catch((error) => Plugins.message.error(`保存测速设置失败：${String(error)}`))
+        }, 500)
+      }
       const refreshPreview = async () => {
         settings.value = normalizeSettings(settings.value)
         preview.value = await buildPreviewContext(settings.value)
       }
       const saveOnly = async () => {
-        settings.value = normalizeSettings(settings.value)
-        await saveSettings(settings.value)
+        await persistSettings()
         Plugins.message.success('TCP 延迟与测速设置已保存')
       }
       const runTests = async () => {
         if (running.value) return
-        settings.value = normalizeSettings(settings.value)
+        await persistSettings()
         preview.value = await buildPreviewContext(settings.value)
         if (preview.value.selectedNodes.length === 0) {
           Plugins.message.warn('请至少选择一个节点或策略组')
           return
         }
         running.value = true
-        await saveSettings(settings.value)
+        runningResults.value = []
+        progress.value = {
+          text: '准备测速',
+          detail: `${preview.value.selectedNodes.length} 个节点`
+        }
         try {
-          const results = await executeTests(preview.value.sourceConfig, preview.value.selectedNodes, settings.value)
-          history.value = trimHistory(results.concat(history.value), settings.value)
-          await saveHistory(history.value, settings.value)
+          const results = await executeTests(preview.value.sourceConfig, preview.value.selectedNodes, settings.value, {
+            onStatus(text, detail = '') {
+              progress.value = { text, detail }
+            },
+            async onResult(result) {
+              runningResults.value = runningResults.value.concat([result])
+              history.value = trimHistory([result].concat(history.value), settings.value)
+              await saveHistory(history.value, settings.value)
+              getState().history.value = history.value
+            }
+          })
           getState().history.value = history.value
+          progress.value = {
+            text: '测速完成',
+            detail: `${results.length} 个节点`
+          }
           Plugins.message.success(`测试完成：${results.length} 个节点`)
         } catch (error) {
+          progress.value = {
+            text: '测速失败',
+            detail: String(error?.message || error)
+          }
           Plugins.message.error(String(error))
         } finally {
           await stopRuntime()
@@ -339,13 +412,17 @@ const openManager = async () => {
         history.value = []
         await saveHistory(history.value, settings.value)
         getState().history.value = history.value
+        runningResults.value = []
         Plugins.message.success('历史结果已清空')
       }
+      Vue.watch(settings, scheduleSettingsSave, { deep: true })
 
       return {
         pluginVersion: Plugin.version || '',
         settings,
         preview,
+        progress,
+        runningResults,
         history,
         running,
         summaryText: Vue.computed(() => `当前配置：${preview.value.profileName || '未找到'}，可测节点 ${preview.value.nodes.length} 个，策略组 ${preview.value.groups.length} 个`),
@@ -452,19 +529,23 @@ const resolveSelectedNodes = (nodes, groups, settings) => {
   return Array.from(selected).map((tag) => nodeMap.get(tag)).filter(Boolean)
 }
 
-const executeTests = async (sourceConfig, selectedNodes, settings) => {
+const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}) => {
   let completed = 0
   const total = selectedNodes.length
   const msg = Plugins.message.info('正在启动临时测速核心...', 999999)
   const results = []
   try {
-    const runtime = await startRuntime(sourceConfig, selectedNodes, settings)
+    reporter.onStatus?.('正在启动临时测速核心', `${total} 个节点`)
+    const runtime = await startRuntime(sourceConfig, selectedNodes, settings, reporter)
     msg.update?.(`TCP 测试中 0 / ${total}`)
     for (const node of selectedNodes) {
-      const result = await testSingleNode(runtime, node, settings)
+      reporter.onStatus?.(`正在测试 ${node.tag}`, `${completed + 1} / ${total}`)
+      const result = await testSingleNode(runtime, node, settings, reporter)
       results.push(result)
+      await reporter.onResult?.(result)
       completed += 1
       msg.update?.(`TCP 测试中 ${completed} / ${total}`)
+      reporter.onStatus?.(`已完成 ${completed} / ${total}`, result.error ? `${node.tag}：${result.error}` : `${node.tag}：成功`)
     }
     msg.success?.(`TCP 测试完成 ${completed} / ${total}`)
     await Plugins.sleep(1200)
@@ -478,9 +559,10 @@ const executeTests = async (sourceConfig, selectedNodes, settings) => {
   }
 }
 
-const startRuntime = async (sourceConfig, selectedNodes, settings) => {
+const startRuntime = async (sourceConfig, selectedNodes, settings, reporter = {}) => {
   await stopRuntime()
   const secret = Plugins.generateSecureKey()
+  reporter.onStatus?.('正在分配测速端口', `${selectedNodes.length} 个节点`)
   const ports = await getAvailablePorts(selectedNodes.length + 1)
   const apiPort = ports[0]
   const httpPorts = ports.slice(1)
@@ -489,7 +571,9 @@ const startRuntime = async (sourceConfig, selectedNodes, settings) => {
   const configPath = `${runtimeDir}/config.json`
   await Plugins.MakeDir(runtimeDir).catch(() => {})
   const portMap = new Map(selectedNodes.map((node, index) => [node.tag, httpPorts[index]]))
+  reporter.onStatus?.('正在检测旁路接口', settings.bypassTun ? '旁路 TUN 已启用' : '旁路 TUN 已关闭')
   const bindInterface = await resolveBindInterface(settings)
+  reporter.onStatus?.('正在写入临时配置', bindInterface ? `绑定接口 ${bindInterface}` : '不绑定物理接口')
   const runtimeConfig = createRuntimeConfig(sourceConfig, selectedNodes, controller, secret, portMap, bindInterface)
   await Plugins.WriteFile(configPath, JSON.stringify(runtimeConfig, null, 2))
   const isAlpha = Plugins.useAppSettingsStore().app?.kernel?.branch === 'alpha'
@@ -500,7 +584,8 @@ const startRuntime = async (sourceConfig, selectedNodes, settings) => {
     Plugins.AbsolutePath(runtimeDir)
   ])
   const baseUrl = `http://${controller}`
-  const pid = await runCore(corePath, absoluteConfigPath, workingDir, baseUrl, secret)
+  reporter.onStatus?.('正在启动临时测速核心', controller)
+  const pid = await runCore(corePath, absoluteConfigPath, workingDir, baseUrl, secret, reporter)
   const runtime = {
     pid,
     configPath,
@@ -510,6 +595,7 @@ const startRuntime = async (sourceConfig, selectedNodes, settings) => {
     portMap
   }
   getState().runtime = runtime
+  reporter.onStatus?.('临时测速核心已启动', controller)
   return runtime
 }
 
@@ -596,7 +682,7 @@ const collectRuntimeOutbounds = (sourceConfig, selectedNodes, bindInterface) => 
   return collected
 }
 
-const runCore = async (corePath, configPath, workingDir, baseUrl, secret) => {
+const runCore = async (corePath, configPath, workingDir, baseUrl, secret, reporter = {}) => {
   let output = ''
   let runtimeError = ''
   const pidTask = Plugins.ExecBackground(
@@ -615,17 +701,20 @@ const runCore = async (corePath, configPath, workingDir, baseUrl, secret) => {
     runtimeError = String(error?.message || error)
     return null
   })
-  await waitForCoreReady(baseUrl, secret, () => runtimeError)
+  await waitForCoreReady(baseUrl, secret, () => runtimeError, reporter)
   return await Promise.race([
     pidTask,
     Plugins.sleep(500).then(() => null)
   ]) || await findRuntimePid(configPath)
 }
 
-const waitForCoreReady = async (baseUrl, secret, getRuntimeError) => {
+const waitForCoreReady = async (baseUrl, secret, getRuntimeError, reporter = {}) => {
   const deadline = Date.now() + 12000
   let lastError = ''
+  let attempts = 0
   while (Date.now() < deadline) {
+    attempts += 1
+    reporter.onStatus?.('等待临时核心 API 就绪', `${attempts} 次`)
     const runtimeError = getRuntimeError?.()
     if (runtimeError) throw runtimeError
     try {
@@ -680,7 +769,7 @@ const stopRuntime = async () => {
   getState().runtime = null
 }
 
-const testSingleNode = async (runtime, node, settings) => {
+const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   const now = Date.now()
   const base = {
     id: Plugins.sampleID(),
@@ -696,7 +785,9 @@ const testSingleNode = async (runtime, node, settings) => {
     error: ''
   }
   try {
+    reporter.onStatus?.(`正在测试 ${node.tag}`, 'TCP 延迟')
     const tcpDelayMs = await testTcpDelay(runtime, node.tag, settings)
+    reporter.onStatus?.(`正在测试 ${node.tag}`, `下载测速，延迟 ${tcpDelayMs} ms`)
     const speed = await testDownloadSpeed(getNodeProxyUrl(runtime, node.tag), settings)
     return {
       ...base,
