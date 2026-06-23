@@ -227,6 +227,9 @@ const openManager = async () => {
                   <div class="min-w-0">
                     <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
                     <div class="text-11 opacity-70">{{ node.type }}</div>
+                    <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
+                      链式代理：{{ node.chainInfo.chainText }}
+                    </div>
                   </div>
                 </div>
               </label>
@@ -261,6 +264,9 @@ const openManager = async () => {
           <div v-for="node in preview.selectedNodes" :key="node.tag" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
             <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
             <div class="text-11 opacity-70">{{ node.type }}</div>
+            <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
+              链式代理：{{ node.chainInfo.chainText }}
+            </div>
           </div>
           <div v-if="preview.selectedNodes.length === 0" class="text-12 opacity-70">未选择节点或策略组。</div>
         </div>
@@ -280,6 +286,7 @@ const openManager = async () => {
               <tr style="border-bottom: 1px solid #cbd5e1;">
                 <th class="text-left p-6">节点</th>
                 <th class="text-left p-6">类型</th>
+                <th class="text-left p-6">链式代理</th>
                 <th class="text-left p-6">TCP 延迟</th>
                 <th class="text-left p-6">测速</th>
                 <th class="text-left p-6">下载量</th>
@@ -291,6 +298,7 @@ const openManager = async () => {
               <tr v-for="item in runningResults" :key="item.id" style="border-bottom: 1px solid #e2e8f0;">
                 <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
                 <td class="p-6">{{ item.type }}</td>
+                <td class="p-6" style="min-width: 220px;">{{ item.chainText || '-' }}</td>
                 <td class="p-6">{{ formatRunningDelay(item) }}</td>
                 <td class="p-6">{{ formatRunningSpeed(item) }}</td>
                 <td class="p-6">{{ formatBytes(item.bytesRead) }}</td>
@@ -298,7 +306,7 @@ const openManager = async () => {
                 <td class="p-6">{{ formatRunningResult(item) }}</td>
               </tr>
               <tr v-if="runningResults.length === 0">
-                <td class="p-8 text-center opacity-70" colspan="7">等待开始测速</td>
+                <td class="p-8 text-center opacity-70" colspan="8">等待开始测速</td>
               </tr>
             </tbody>
           </table>
@@ -317,6 +325,7 @@ const openManager = async () => {
                 <th class="text-left p-6">时间</th>
                 <th class="text-left p-6">节点</th>
                 <th class="text-left p-6">类型</th>
+                <th class="text-left p-6">链式代理</th>
                 <th class="text-left p-6">TCP 延迟</th>
                 <th class="text-left p-6">测速</th>
                 <th class="text-left p-6">下载量</th>
@@ -328,13 +337,14 @@ const openManager = async () => {
                 <td class="p-6 whitespace-nowrap">{{ formatTime(item.time) }}</td>
                 <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
                 <td class="p-6">{{ item.type }}</td>
+                <td class="p-6" style="min-width: 220px;">{{ item.chainText || '-' }}</td>
                 <td class="p-6">{{ item.tcpDelayMs > 0 ? item.tcpDelayMs + ' ms' : '失败' }}</td>
                 <td class="p-6">{{ item.speedMbps > 0 ? item.speedMbps + ' Mbps' : '失败' }}</td>
                 <td class="p-6">{{ formatBytes(item.bytesRead) }}</td>
                 <td class="p-6">{{ item.error || '成功' }}</td>
               </tr>
               <tr v-if="history.length === 0">
-                <td class="p-8 text-center opacity-70" colspan="7">暂无历史结果</td>
+                <td class="p-8 text-center opacity-70" colspan="8">暂无历史结果</td>
               </tr>
             </tbody>
           </table>
@@ -477,7 +487,12 @@ const buildPreviewContext = async (settings) => {
   if (!generatedConfig) {
     return createPreviewContext({ profileName: profile.name || '' })
   }
+  const outboundMap = new Map((generatedConfig?.outbounds || []).filter((outbound) => outbound?.tag).map((outbound) => [outbound.tag, outbound]))
   const nodes = collectTestNodes(generatedConfig)
+    .map((node) => ({
+      ...node,
+      chainInfo: buildChainInfo(node.outbound, outboundMap)
+    }))
   const groups = collectGroups(generatedConfig, nodes)
   const selectedNodes = resolveSelectedNodes(nodes, groups, settings)
   return createPreviewContext({
@@ -516,6 +531,38 @@ const collectTestNodes = (config) => {
     }))
 }
 
+const buildChainInfo = (outbound, outboundMap) => {
+  const chain = []
+  const visited = new Set([outbound?.tag])
+  let current = outbound
+  let hasCycle = false
+  let missingTag = ''
+  while (current?.detour) {
+    const nextTag = String(current.detour || '').trim()
+    if (!nextTag) break
+    chain.push(nextTag)
+    if (visited.has(nextTag)) {
+      hasCycle = true
+      break
+    }
+    visited.add(nextTag)
+    const nextOutbound = outboundMap.get(nextTag)
+    if (!nextOutbound) {
+      missingTag = nextTag
+      break
+    }
+    current = nextOutbound
+  }
+  const suffix = hasCycle ? '（循环）' : missingTag ? '（缺失）' : ''
+  return {
+    isChained: chain.length > 0,
+    chain,
+    chainText: chain.length > 0 ? `${chain.join(' -> ')}${suffix}` : '',
+    hasCycle,
+    missingTag
+  }
+}
+
 const collectGroups = (config, nodes) => {
   const nodeTags = new Set(nodes.map((node) => node.tag))
   return (config?.outbounds || [])
@@ -545,6 +592,7 @@ const createPendingResults = (nodes) => nodes.map((node) => ({
   time: Date.now(),
   tag: node.tag,
   type: node.type,
+  chainText: node.chainInfo?.chainText || '',
   delayUrl: '',
   speedUrl: '',
   tcpDelayMs: -1,
@@ -807,6 +855,7 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
     time: now,
     tag: node.tag,
     type: node.type,
+    chainText: node.chainInfo?.chainText || '',
     delayUrl: settings.delayUrl,
     speedUrl: settings.speedUrl,
     tcpDelayMs: -1,
