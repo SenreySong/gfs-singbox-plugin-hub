@@ -72,6 +72,8 @@ const BASE_CONFIG = {
   }
 }
 
+const clone = (value) => JSON.parse(JSON.stringify(value))
+
 window[Plugin.id] = window[Plugin.id] || {
   settings: Vue.ref(clone(DEFAULT_SETTINGS)),
   history: Vue.ref([]),
@@ -773,8 +775,6 @@ const normalizePositiveInteger = (value, fallback, min, max) => {
 const uniqueStrings = (items) => Array.from(new Set(toArray(items).map((item) => String(item || '').trim()).filter(Boolean)))
 
 const toArray = (value) => Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
-
-const clone = (value) => JSON.parse(JSON.stringify(value))
 
 export default {
   onReady,
