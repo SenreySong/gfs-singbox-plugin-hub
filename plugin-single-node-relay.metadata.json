@@ -1,0 +1,34 @@
+{
+  "id": "plugin-single-node-relay",
+  "name": "指定节点中转",
+  "version": "v1.0.4",
+  "group": "Extensions",
+  "description": "为指定 sing-box 出站节点配置中转节点，启动前写入 detour，订阅或配置更新不会覆盖插件保存的中转关系。 作者：SenreySong",
+  "tags": [
+    "实用工具",
+    "功能扩展",
+    "提升体验"
+  ],
+  "type": "File",
+  "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-single-node-relay.js",
+  "path": "data/plugins/plugin-single-node-relay.js",
+  "triggers": [
+    "on::manual",
+    "on::ready",
+    "on::before::core::start"
+  ],
+  "hasUI": true,
+  "menus": {},
+  "context": {
+    "profiles": {},
+    "subscriptions": {},
+    "rulesets": {},
+    "plugins": {},
+    "scheduledtasks": {}
+  },
+  "status": 0,
+  "configuration": [],
+  "disabled": false,
+  "install": false,
+  "installed": false
+}

@@ -1,0 +1,170 @@
+[
+  {
+    "id": "plugin-single-node-relay",
+    "name": "指定节点中转",
+    "version": "v1.0.4",
+    "group": "Extensions",
+    "description": "为指定 sing-box 出站节点配置中转节点，启动前写入 detour，订阅或配置更新不会覆盖插件保存的中转关系。 作者：SenreySong",
+    "tags": [
+      "实用工具",
+      "功能扩展",
+      "提升体验"
+    ],
+    "type": "Http",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-single-node-relay.js",
+    "path": "data/plugins/plugin-single-node-relay.js",
+    "triggers": [
+      "on::manual",
+      "on::ready",
+      "on::before::core::start"
+    ],
+    "hasUI": true,
+    "menus": {},
+    "context": {
+      "profiles": {},
+      "subscriptions": {},
+      "rulesets": {},
+      "plugins": {},
+      "scheduledtasks": {}
+    },
+    "status": 0,
+    "configuration": [],
+    "disabled": false,
+    "install": false,
+    "installed": false
+  },
+  {
+    "id": "plugin-outbound-dns-resolver",
+    "name": "出站 DNS 解析器",
+    "version": "v1.2.1",
+    "group": "Extensions",
+    "description": "按多条规则为 sing-box 出站写入 domain_resolver，并可为没有 DNS 的域名出站补默认 DNS。 作者：SenreySong",
+    "tags": [
+      "实用工具",
+      "功能扩展",
+      "DNS"
+    ],
+    "type": "Http",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-outbound-dns-resolver.js",
+    "path": "data/plugins/plugin-outbound-dns-resolver.js",
+    "triggers": [
+      "on::manual",
+      "on::ready",
+      "on::before::core::start"
+    ],
+    "hasUI": true,
+    "menus": {},
+    "context": {
+      "profiles": {},
+      "subscriptions": {},
+      "rulesets": {},
+      "plugins": {},
+      "scheduledtasks": {}
+    },
+    "status": 0,
+    "configuration": [],
+    "disabled": false,
+    "install": false,
+    "installed": false
+  },
+  {
+    "id": "plugin-policy-group-manager",
+    "name": "策略组自动整理",
+    "version": "v1.1.2",
+    "group": "Extensions",
+    "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未命中节点，并插入未隐藏策略组。 作者：SenreySong",
+    "tags": [
+      "实用工具",
+      "功能扩展",
+      "策略组"
+    ],
+    "type": "Http",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-policy-group-manager.js",
+    "path": "data/plugins/plugin-policy-group-manager.js",
+    "triggers": [
+      "on::manual",
+      "on::ready",
+      "on::before::core::start"
+    ],
+    "hasUI": true,
+    "menus": {},
+    "context": {
+      "profiles": {},
+      "subscriptions": {},
+      "rulesets": {},
+      "plugins": {},
+      "scheduledtasks": {}
+    },
+    "status": 0,
+    "configuration": [],
+    "disabled": false,
+    "install": false,
+    "installed": false
+  },
+  {
+    "id": "plugin-singbox-beta-migrator",
+    "name": "测试版核心配置迁移",
+    "version": "v1.0.7",
+    "group": "Extensions",
+    "description": "在使用 sing-box 测试版核心时，启动前自动转换 1.14 DNS/TUN/HTTP/ACME 不兼容配置，并可查看运行中的完整配置。 作者：SenreySong",
+    "tags": [
+      "实用工具",
+      "功能扩展",
+      "迁移"
+    ],
+    "type": "Http",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-singbox-beta-migrator.js",
+    "path": "data/plugins/plugin-singbox-beta-migrator.js",
+    "triggers": [
+      "on::manual",
+      "on::ready",
+      "on::before::core::start"
+    ],
+    "hasUI": true,
+    "menus": {},
+    "context": {
+      "profiles": {},
+      "subscriptions": {},
+      "rulesets": {},
+      "plugins": {},
+      "scheduledtasks": {}
+    },
+    "status": 0,
+    "configuration": [],
+    "disabled": false,
+    "install": false,
+    "installed": false
+  },
+  {
+    "id": "plugin-tcp-speed-tester",
+    "name": "TCP 延迟与测速",
+    "version": "v1.0.1",
+    "group": "Extensions",
+    "description": "选择节点或策略组执行 TCP 连接延迟与下载测速，支持旁路当前 TUN，并持久化历史结果用于多次对比。 作者：SenreySong",
+    "tags": [
+      "实用工具",
+      "功能扩展",
+      "测速"
+    ],
+    "type": "Http",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-tcp-speed-tester.js",
+    "path": "data/plugins/plugin-tcp-speed-tester.js",
+    "triggers": [
+      "on::manual"
+    ],
+    "hasUI": true,
+    "menus": {},
+    "context": {
+      "profiles": {},
+      "subscriptions": {},
+      "rulesets": {},
+      "plugins": {},
+      "scheduledtasks": {}
+    },
+    "status": 0,
+    "configuration": [],
+    "disabled": false,
+    "install": false,
+    "installed": false
+  }
+]
