@@ -453,12 +453,13 @@ const resolveSelectedNodes = (nodes, groups, settings) => {
 }
 
 const executeTests = async (sourceConfig, selectedNodes, settings) => {
-  const runtime = await startRuntime(sourceConfig, selectedNodes, settings)
   let completed = 0
   const total = selectedNodes.length
-  const msg = Plugins.message.info(`TCP 测试中 0 / ${total}`, 999999)
+  const msg = Plugins.message.info('正在启动临时测速核心...', 999999)
   const results = []
   try {
+    const runtime = await startRuntime(sourceConfig, selectedNodes, settings)
+    msg.update?.(`TCP 测试中 0 / ${total}`)
     for (const node of selectedNodes) {
       const result = await testSingleNode(runtime, node, settings)
       results.push(result)
@@ -498,11 +499,13 @@ const startRuntime = async (sourceConfig, selectedNodes, settings) => {
     Plugins.AbsolutePath(configPath),
     Plugins.AbsolutePath(runtimeDir)
   ])
-  const pid = await runCore(corePath, absoluteConfigPath, workingDir)
+  const baseUrl = `http://${controller}`
+  const pid = await runCore(corePath, absoluteConfigPath, workingDir, baseUrl, secret)
   const runtime = {
     pid,
     configPath,
-    baseUrl: `http://${controller}`,
+    absoluteConfigPath,
+    baseUrl,
     secret,
     portMap
   }
@@ -593,30 +596,86 @@ const collectRuntimeOutbounds = (sourceConfig, selectedNodes, bindInterface) => 
   return collected
 }
 
-const runCore = async (corePath, configPath, workingDir) => {
-  return new Promise((resolve, reject) => {
-    let output = ''
-    const pidPromise = Plugins.ExecBackground(
-      corePath,
-      ['run', '--disable-color', '-c', configPath, '-D', workingDir],
-      (out) => {
-        output = out
-        if (out.includes('sing-box started')) {
-          pidPromise.then(resolve).catch(reject)
-        }
-      },
-      () => reject(output || '临时核心异常退出'),
-      {
-        StopOutputKeyword: 'sing-box started'
-      }
-    ).catch(reject)
+const runCore = async (corePath, configPath, workingDir, baseUrl, secret) => {
+  let output = ''
+  let runtimeError = ''
+  const pidTask = Plugins.ExecBackground(
+    corePath,
+    ['run', '--disable-color', '-c', configPath, '-D', workingDir],
+    (out) => {
+      output = `${output}${String(out || '')}`.slice(-4000)
+    },
+    () => {
+      runtimeError = output || '临时核心异常退出'
+    },
+    {
+      StopOutputKeyword: 'sing-box started'
+    }
+  ).catch((error) => {
+    runtimeError = String(error?.message || error)
+    return null
   })
+  await waitForCoreReady(baseUrl, secret, () => runtimeError)
+  return await Promise.race([
+    pidTask,
+    Plugins.sleep(500).then(() => null)
+  ]) || await findRuntimePid(configPath)
+}
+
+const waitForCoreReady = async (baseUrl, secret, getRuntimeError) => {
+  const deadline = Date.now() + 12000
+  let lastError = ''
+  while (Date.now() < deadline) {
+    const runtimeError = getRuntimeError?.()
+    if (runtimeError) throw runtimeError
+    try {
+      const { status, body } = await Plugins.Requests({
+        method: 'GET',
+        url: `${baseUrl}/proxies`,
+        autoTransformBody: false,
+        headers: {
+          Authorization: `Bearer ${secret}`
+        },
+        options: {
+          Proxy: '',
+          Timeout: 1000
+        }
+      })
+      if (status >= 200 && status < 300) return
+      lastError = `HTTP ${status}${body ? ` ${String(body).slice(0, 120)}` : ''}`
+    } catch (error) {
+      lastError = String(error?.message || error)
+    }
+    await Plugins.sleep(250)
+  }
+  throw `临时测速核心启动超时${lastError ? `：${lastError}` : ''}`
+}
+
+const findRuntimePid = async (configPath) => {
+  const pgrepOutput = await Plugins.Exec('pgrep', ['-f', configPath]).catch(() => '')
+  const pgrepPid = parsePid(pgrepOutput)
+  if (pgrepPid) return pgrepPid
+  const psOutput = await Plugins.Exec('ps', ['ax', '-o', 'pid=', '-o', 'command=']).catch(() => '')
+  for (const line of String(psOutput).split('\n')) {
+    if (!line.includes(configPath) || !line.includes('sing-box')) continue
+    const pid = parsePid(line)
+    if (pid) return pid
+  }
+  return null
+}
+
+const parsePid = (value) => {
+  const matched = String(value || '').match(/\b(\d+)\b/)
+  if (!matched) return null
+  const pid = Number(matched[1])
+  return Number.isInteger(pid) && pid > 0 ? pid : null
 }
 
 const stopRuntime = async () => {
   const runtime = getState().runtime
   if (!runtime) return
-  if (runtime.pid) await Plugins.KillProcess(runtime.pid).catch(() => {})
+  const pid = runtime.pid || await findRuntimePid(runtime.absoluteConfigPath || runtime.configPath)
+  if (pid) await Plugins.KillProcess(pid).catch(() => {})
   if (runtime.configPath) await Plugins.RemoveFile(runtime.configPath).catch(() => {})
   getState().runtime = null
 }
