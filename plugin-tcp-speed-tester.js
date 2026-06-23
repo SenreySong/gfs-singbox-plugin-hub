@@ -19,19 +19,16 @@ const TEST_OUTBOUND_TYPES = new Set([
   'shadowtls',
   'naive'
 ])
-const GROUP_OUTBOUND_TYPES = new Set(['selector', 'urltest'])
 const EXCLUDED_OUTBOUND_TAGS = new Set(['direct', 'Direct', 'block', 'Block', 'dns', 'DNS'])
 const DEFAULT_SETTINGS = {
   delayUrl: DEFAULT_DELAY_URL,
   speedUrl: DEFAULT_SPEED_URL,
   delayTimeout: 5000,
   speedTimeout: 20000,
-  speedBytes: 25000000,
   historyLimit: 200,
   bypassTun: true,
   bindInterface: '',
-  selectedNodeTags: [],
-  selectedGroupTags: []
+  selectedNodeTags: []
 }
 const BASE_CONFIG = {
   log: {
@@ -148,12 +145,10 @@ const normalizeSettings = (settings) => ({
   speedUrl: String(settings?.speedUrl || DEFAULT_SPEED_URL).trim(),
   delayTimeout: normalizePositiveInteger(settings?.delayTimeout, DEFAULT_SETTINGS.delayTimeout, 1000, 60000),
   speedTimeout: normalizePositiveInteger(settings?.speedTimeout, DEFAULT_SETTINGS.speedTimeout, 3000, 120000),
-  speedBytes: normalizePositiveInteger(settings?.speedBytes, DEFAULT_SETTINGS.speedBytes, 1024, 500000000),
   historyLimit: normalizePositiveInteger(settings?.historyLimit, DEFAULT_SETTINGS.historyLimit, 20, 1000),
   bypassTun: settings?.bypassTun !== false,
   bindInterface: String(settings?.bindInterface || '').trim(),
-  selectedNodeTags: uniqueStrings(settings?.selectedNodeTags),
-  selectedGroupTags: uniqueStrings(settings?.selectedGroupTags)
+  selectedNodeTags: uniqueStrings(settings?.selectedNodeTags)
 })
 
 const onReady = async () => {
@@ -173,16 +168,24 @@ const openManager = async () => {
   const progress = ref({ text: '就绪', detail: '' })
   const runningResults = ref([])
   const running = ref(false)
+  const nodeKeyword = ref('')
 
   const component = {
     template: `
-    <div class="flex flex-col gap-10 pr-8">
-      <div class="flex items-center justify-between gap-8">
-        <div class="min-w-0">
-          <div class="font-bold text-16">TCP 延迟与测速 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
+    <div class="flex flex-col gap-10 pr-8" style="color: #334155;">
+      <div class="flex items-start justify-between gap-12">
+        <div class="min-w-0 flex flex-col gap-4">
+          <div class="font-bold text-16" style="color: #0f172a;">TCP 延迟与测速 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
           <div class="text-12 opacity-70 truncate" :title="summaryText">{{ summaryText }}</div>
+          <div class="flex gap-6 text-11" style="flex-wrap: wrap;">
+            <span class="rounded-4 px-8 py-3" style="background: #eff6ff; color: #1d4ed8;">节点 {{ preview.nodes.length }}</span>
+            <span class="rounded-4 px-8 py-3" style="background: #ecfdf5; color: #047857;">已选 {{ selectedNodeCount }}</span>
+            <span class="rounded-4 px-8 py-3" :style="preview.hasTunInbound ? 'background: #fffbeb; color: #92400e;' : 'background: #f1f5f9; color: #475569;'">
+              {{ preview.hasTunInbound ? '检测到 TUN' : '未检测到 TUN' }}
+            </span>
+          </div>
         </div>
-        <div class="flex gap-8">
+        <div class="flex gap-8" style="flex-shrink: 0;">
           <Button @click="refreshPreview" :disabled="running">刷新节点</Button>
           <Button type="primary" @click="runTests" :loading="running" :disabled="running">开始测试</Button>
           <Button @click="saveOnly" :disabled="running">保存</Button>
@@ -190,85 +193,71 @@ const openManager = async () => {
       </div>
 
       <Card>
-        <div class="grid items-center gap-8" style="grid-template-columns: 140px minmax(220px, 1fr) 140px minmax(160px, 1fr);">
-          <div class="font-bold text-13">延迟地址</div>
-          <Input v-model="settings.delayUrl" allow-paste :disabled="running" />
-          <div class="font-bold text-13">延迟超时(ms)</div>
-          <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
-          <div class="font-bold text-13">测速地址</div>
-          <Input v-model="settings.speedUrl" allow-paste :disabled="running" />
-          <div class="font-bold text-13">测速超时(ms)</div>
-          <Input v-model="settings.speedTimeout" type="number" editable :disabled="running" />
-          <div class="font-bold text-13">测速字节数</div>
-          <Input v-model="settings.speedBytes" type="number" editable :disabled="running" />
-          <div class="font-bold text-13">历史保留</div>
-          <Input v-model="settings.historyLimit" type="number" editable :disabled="running" />
-          <div class="font-bold text-13">旁路当前 TUN</div>
-          <Switch v-model="settings.bypassTun" :disabled="running">启用</Switch>
-          <div class="font-bold text-13">物理接口</div>
-          <Input v-model="settings.bindInterface" placeholder="自动检测，或手动填 en0/en12" allow-paste :disabled="running" />
-          <div class="text-12 opacity-70" style="grid-column: 2 / -1;">
-            默认延迟地址使用 Cloudflare CP；默认测速地址使用 Cloudflare speedtest 下载文件。启用旁路时会自动检测默认物理接口，也可手动填写。
+        <div class="flex flex-col gap-10">
+          <div class="grid gap-10" style="grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr);">
+            <div class="flex flex-col gap-8">
+              <div class="font-bold text-13" style="color: #0f172a;">测试地址</div>
+              <div class="grid items-center gap-8" style="grid-template-columns: 76px minmax(0, 1fr);">
+                <div class="text-12 opacity-70">延迟</div>
+                <Input v-model="settings.delayUrl" allow-paste :disabled="running" />
+                <div class="text-12 opacity-70">测速</div>
+                <Input v-model="settings.speedUrl" allow-paste :disabled="running" />
+              </div>
+            </div>
+            <div class="flex flex-col gap-8">
+              <div class="font-bold text-13" style="color: #0f172a;">运行参数</div>
+              <div class="grid items-center gap-8" style="grid-template-columns: 96px minmax(0, 1fr);">
+                <div class="text-12 opacity-70">延迟超时</div>
+                <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
+                <div class="text-12 opacity-70">测速超时</div>
+                <Input v-model="settings.speedTimeout" type="number" editable :disabled="running" />
+                <div class="text-12 opacity-70">历史保留</div>
+                <Input v-model="settings.historyLimit" type="number" editable :disabled="running" />
+              </div>
+            </div>
+          </div>
+          <div class="grid items-center gap-8" style="grid-template-columns: 128px 96px 76px minmax(160px, 1fr);">
+            <div class="font-bold text-13" style="color: #0f172a;">尽量旁路当前 TUN</div>
+            <Switch v-model="settings.bypassTun" :disabled="running">启用</Switch>
+            <div class="text-12 opacity-70">物理接口</div>
+            <Input v-model="settings.bindInterface" placeholder="自动检测，或手动填 en0/en12" allow-paste :disabled="running" />
+          </div>
+          <div class="text-12 opacity-70">
+            旁路只会让临时测速核心尽量绑定物理接口，无法关闭或完全绕过 GFS 正在运行的系统级 TUN。
+          </div>
+          <div v-if="preview.hasTunInbound" class="rounded-4 p-8 text-12" style="grid-column: 1 / -1; border: 1px solid #f59e0b; background: #fffbeb; color: #92400e;">
+            检测到当前生成配置包含 TUN 入站。插件不会自动关闭 GFS 的 TUN 模式；开启 TUN 时测速请求可能被系统路由影响，建议关闭 TUN 模式后再测。
           </div>
         </div>
       </Card>
 
       <Card>
-        <div class="grid gap-12" style="grid-template-columns: 1fr 1fr;">
+        <div class="flex items-center justify-between gap-10 mb-8">
           <div>
-            <div class="flex items-center justify-between mb-8">
-              <div class="font-bold text-14">节点</div>
-              <div class="text-12 opacity-70">已选 {{ selectedNodeCount }} / {{ preview.nodes.length }}</div>
-            </div>
-            <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 300px; overflow-y: auto;">
-              <label v-for="node in preview.nodes" :key="node.tag" class="rounded-4 p-8" :class="{ 'cursor-pointer': !running }" style="border: 1px solid #cbd5e1; background: #f8fafc;">
-                <div class="flex items-start gap-8">
-                  <input type="checkbox" :value="node.tag" v-model="settings.selectedNodeTags" :disabled="running" />
-                  <div class="min-w-0">
-                    <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
-                    <div class="text-11 opacity-70">{{ node.type }}</div>
-                    <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
-                      链式代理：{{ node.chainInfo.chainText }}
-                    </div>
-                  </div>
-                </div>
-              </label>
-            </div>
+            <div class="font-bold text-14" style="color: #0f172a;">节点</div>
+            <div class="text-12 opacity-70">已选 {{ selectedNodeCount }} / {{ preview.nodes.length }}，当前显示 {{ filteredNodes.length }} 个</div>
           </div>
-          <div>
-            <div class="flex items-center justify-between mb-8">
-              <div class="font-bold text-14">策略组</div>
-              <div class="text-12 opacity-70">已选 {{ selectedGroupCount }} / {{ preview.groups.length }}</div>
-            </div>
-            <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 300px; overflow-y: auto;">
-              <label v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8" :class="{ 'cursor-pointer': !running }" style="border: 1px solid #cbd5e1; background: #f8fafc;">
-                <div class="flex items-start gap-8">
-                  <input type="checkbox" :value="group.tag" v-model="settings.selectedGroupTags" :disabled="running" />
-                  <div class="min-w-0">
-                    <div class="font-bold text-12 truncate" :title="group.tag">{{ group.tag }}</div>
-                    <div class="text-11 opacity-70">{{ group.outbounds.length }} 个节点</div>
-                  </div>
-                </div>
-              </label>
-            </div>
+          <div class="flex items-center gap-8" style="min-width: min(420px, 100%); flex-wrap: wrap;">
+            <Input v-model="nodeKeyword" placeholder="搜索节点、类型或链式代理" allow-paste :disabled="running" />
+            <Button @click="selectVisibleNodes" :disabled="running || filteredNodes.length === 0">全选显示</Button>
+            <Button @click="clearSelectedNodes" :disabled="running || selectedNodeCount === 0">清空</Button>
           </div>
         </div>
-      </Card>
-
-      <Card>
-        <div class="flex items-center justify-between mb-8">
-          <div class="font-bold text-14">本次待测</div>
-          <div class="text-12 opacity-70">{{ preview.selectedNodes.length }} 个节点</div>
-        </div>
-        <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); max-height: 220px; overflow-y: auto;">
-          <div v-for="node in preview.selectedNodes" :key="node.tag" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
-            <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
-            <div class="text-11 opacity-70">{{ node.type }}</div>
-            <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
-              链式代理：{{ node.chainInfo.chainText }}
+        <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 360px; overflow-y: auto;">
+          <label v-for="node in filteredNodes" :key="node.tag" class="rounded-4 p-8" :class="{ 'cursor-pointer': !running }" :style="nodeCardStyle(node)">
+            <div class="flex items-start gap-8">
+              <input type="checkbox" :value="node.tag" v-model="settings.selectedNodeTags" :disabled="running" />
+              <div class="min-w-0">
+                <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
+                <div class="text-11 opacity-70">{{ node.type }}</div>
+                <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
+                  链式代理：{{ node.chainInfo.chainText }}
+                </div>
+              </div>
             </div>
-          </div>
-          <div v-if="preview.selectedNodes.length === 0" class="text-12 opacity-70">未选择节点或策略组。</div>
+          </label>
+          <div v-if="preview.nodes.length === 0" class="text-12 opacity-70">当前配置没有可测速节点。</div>
+          <div v-else-if="filteredNodes.length === 0" class="text-12 opacity-70">没有匹配的节点。</div>
         </div>
       </Card>
 
@@ -376,14 +365,42 @@ const openManager = async () => {
         await persistSettings()
         Plugins.message.success('TCP 延迟与测速设置已保存')
       }
+      const filteredNodes = Vue.computed(() => {
+        const keyword = String(nodeKeyword.value || '').trim().toLowerCase()
+        if (!keyword) return preview.value.nodes
+        return preview.value.nodes.filter((node) => {
+          return [
+            node.tag,
+            node.type,
+            node.chainInfo?.chainText
+          ].some((value) => String(value || '').toLowerCase().includes(keyword))
+        })
+      })
+      const selectVisibleNodes = () => {
+        if (running.value) return
+        const tags = new Set(settings.value.selectedNodeTags)
+        for (const node of filteredNodes.value) tags.add(node.tag)
+        settings.value.selectedNodeTags = Array.from(tags)
+      }
+      const clearSelectedNodes = () => {
+        if (running.value) return
+        settings.value.selectedNodeTags = []
+      }
+      const nodeCardStyle = (node) => {
+        const selected = settings.value.selectedNodeTags.includes(node.tag)
+        if (selected) return 'border: 1px solid #2563eb; background: #eff6ff;'
+        if (node.chainInfo?.isChained) return 'border: 1px solid #99f6e4; background: #f0fdfa;'
+        return 'border: 1px solid #cbd5e1; background: #f8fafc;'
+      }
       const runTests = async () => {
         if (running.value) return
         await persistSettings()
         preview.value = await buildPreviewContext(settings.value)
         if (preview.value.selectedNodes.length === 0) {
-          Plugins.message.warn('请至少选择一个节点或策略组')
+          Plugins.message.warn('请至少选择一个节点')
           return
         }
+        if (!(await confirmTunRisk(preview.value, settings.value))) return
         running.value = true
         runningResults.value = createPendingResults(preview.value.selectedNodes)
         progress.value = {
@@ -439,13 +456,17 @@ const openManager = async () => {
         pluginVersion: Plugin.version || '',
         settings,
         preview,
+        nodeKeyword,
+        filteredNodes,
         progress,
         runningResults,
         history,
         running,
-        summaryText: Vue.computed(() => `当前配置：${preview.value.profileName || '未找到'}，可测节点 ${preview.value.nodes.length} 个，策略组 ${preview.value.groups.length} 个`),
+        summaryText: Vue.computed(() => `当前配置：${preview.value.profileName || '未找到'}，可测节点 ${preview.value.nodes.length} 个`),
         selectedNodeCount: Vue.computed(() => settings.value.selectedNodeTags.length),
-        selectedGroupCount: Vue.computed(() => settings.value.selectedGroupTags.length),
+        selectVisibleNodes,
+        clearSelectedNodes,
+        nodeCardStyle,
         refreshPreview,
         saveOnly,
         runTests,
@@ -493,13 +514,12 @@ const buildPreviewContext = async (settings) => {
       ...node,
       chainInfo: buildChainInfo(node.outbound, outboundMap)
     }))
-  const groups = collectGroups(generatedConfig, nodes)
-  const selectedNodes = resolveSelectedNodes(nodes, groups, settings)
+  const selectedNodes = resolveSelectedNodes(nodes, settings)
   return createPreviewContext({
     profileName: profile.name || '',
     sourceConfig: generatedConfig,
+    hasTunInbound: hasEnabledTunInbound(generatedConfig),
     nodes,
-    groups,
     selectedNodes
   })
 }
@@ -507,11 +527,26 @@ const buildPreviewContext = async (settings) => {
 const createPreviewContext = (overrides = {}) => ({
   profileName: '',
   sourceConfig: null,
+  hasTunInbound: false,
   nodes: [],
-  groups: [],
   selectedNodes: [],
   ...overrides
 })
+
+const hasEnabledTunInbound = (config) => {
+  return toArray(config?.inbounds).some((inbound) => inbound?.type === 'tun' && inbound?.enabled !== false && inbound?.disabled !== true)
+}
+
+const confirmTunRisk = async (previewContext, settings) => {
+  if (!previewContext?.hasTunInbound) return true
+  const bypassText = settings?.bypassTun
+    ? '当前已启用“尽量旁路当前 TUN”，但它只会给临时测速核心绑定物理接口，不能关闭或完全绕过系统级 TUN。'
+    : '当前未启用“尽量旁路当前 TUN”。'
+  return await Plugins.confirm(
+    'TUN 模式提醒',
+    `${bypassText}\n\n检测到当前生成配置包含 TUN 入站，测速结果可能仍会走正在运行的 TUN，出现多个节点结果接近的情况。建议先关闭 GFS 的 TUN 模式后再测。\n\n仍要继续测速吗？`
+  ).catch(() => false)
+}
 
 const getCurrentProfile = () => {
   const profilesStore = Plugins.useProfilesStore()
@@ -563,27 +598,9 @@ const buildChainInfo = (outbound, outboundMap) => {
   }
 }
 
-const collectGroups = (config, nodes) => {
-  const nodeTags = new Set(nodes.map((node) => node.tag))
-  return (config?.outbounds || [])
-    .filter((outbound) => outbound?.tag && GROUP_OUTBOUND_TYPES.has(outbound.type))
-    .map((group) => ({
-      tag: group.tag,
-      type: group.type,
-      outbounds: toArray(group.outbounds).filter((tag) => nodeTags.has(tag))
-    }))
-    .filter((group) => group.outbounds.length > 0)
-}
-
-const resolveSelectedNodes = (nodes, groups, settings) => {
+const resolveSelectedNodes = (nodes, settings) => {
   const nodeMap = new Map(nodes.map((node) => [node.tag, node]))
   const selected = new Set(settings.selectedNodeTags.filter((tag) => nodeMap.has(tag)))
-  const groupMap = new Map(groups.map((group) => [group.tag, group]))
-  for (const groupTag of settings.selectedGroupTags) {
-    const group = groupMap.get(groupTag)
-    if (!group) continue
-    for (const tag of group.outbounds) selected.add(tag)
-  }
   return Array.from(selected).map((tag) => nodeMap.get(tag)).filter(Boolean)
 }
 
@@ -650,7 +667,7 @@ const startRuntime = async (sourceConfig, selectedNodes, settings, reporter = {}
   const configPath = `${runtimeDir}/config.json`
   await Plugins.MakeDir(runtimeDir).catch(() => {})
   const portMap = new Map(selectedNodes.map((node, index) => [node.tag, httpPorts[index]]))
-  reporter.onStatus?.('正在检测旁路接口', settings.bypassTun ? '旁路 TUN 已启用' : '旁路 TUN 已关闭')
+  reporter.onStatus?.('正在检测旁路接口', settings.bypassTun ? '尽量旁路 TUN 已启用' : '尽量旁路 TUN 已关闭')
   const bindInterface = await resolveBindInterface(settings)
   reporter.onStatus?.('正在写入临时配置', bindInterface ? `绑定接口 ${bindInterface}` : '不绑定物理接口')
   const runtimeConfig = createRuntimeConfig(sourceConfig, selectedNodes, controller, secret, portMap, bindInterface)
@@ -929,7 +946,7 @@ const testDownloadSpeed = async (proxyUrl, settings) => {
     throw `测速下载失败：${status}`
   }
   const durationMs = Math.max(Date.now() - startedAt, 1)
-  const bytesRead = estimateBodyBytes(body, settings.speedBytes)
+  const bytesRead = estimateBodyBytes(body)
   const speedMbps = Number(((bytesRead * 8) / durationMs / 1000).toFixed(2))
   return {
     bytesRead,
@@ -984,11 +1001,11 @@ const safeTag = (tag) => {
     .slice(0, 64) || Plugins.sampleID()
 }
 
-const estimateBodyBytes = (body, fallback) => {
-  if (typeof body === 'string') return new TextEncoder().encode(body).length || fallback
-  if (body instanceof ArrayBuffer) return body.byteLength || fallback
-  if (ArrayBuffer.isView(body)) return body.byteLength || fallback
-  return fallback
+const estimateBodyBytes = (body) => {
+  if (typeof body === 'string') return new TextEncoder().encode(body).length
+  if (body instanceof ArrayBuffer) return body.byteLength
+  if (ArrayBuffer.isView(body)) return body.byteLength
+  return 0
 }
 
 const formatTime = (timestamp) => {

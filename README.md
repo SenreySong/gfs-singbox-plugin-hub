@@ -84,13 +84,16 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 功能：
 
 - 可选择一个或多个节点进行 TCP 延迟与下载测速。
-- 可选择一个或多个策略组，策略组会展开为组内节点并去重。
+- 不提供策略组选择，避免预览阶段拿不到其他插件处理后的策略组导致结果不一致。
+- 节点列表支持搜索、全选当前显示节点和清空选择。
 - TCP 延迟默认使用 `https://cp.cloudflare.com/generate_204`。
 - 下载测速默认使用 `https://speed.cloudflare.com/__down?bytes=25000000`。
-- 测速地址、延迟地址、超时、并发数和测速字节数均可自定义。
+- 测速地址、延迟地址和超时均可自定义。
+- 测试按节点队列逐个执行，不做并发测速。
 - 测试结果持久化保存，方便多次对比。
 - 测试时启动独立临时 sing-box 核心，不修改当前运行核心。
-- 默认启用旁路当前 TUN，自动检测系统默认物理接口并写入 `bind_interface` / `route.default_interface`，也可手动指定接口名。
+- 默认启用尽量旁路当前 TUN，自动检测系统默认物理接口并写入 `bind_interface` / `route.default_interface`，也可手动指定接口名。
+- 如果当前生成配置包含 TUN 入站，插件会明确提示测速结果可能受正在运行的系统级 TUN 影响；插件不会自动关闭 GFS 的 TUN 模式。
 
 ## 文件结构
 
