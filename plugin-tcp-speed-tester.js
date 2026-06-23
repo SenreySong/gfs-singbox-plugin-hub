@@ -184,7 +184,7 @@ const openManager = async () => {
         </div>
         <div class="flex gap-8">
           <Button @click="refreshPreview" :disabled="running">刷新节点</Button>
-          <Button type="primary" @click="runTests" :loading="running">开始测试</Button>
+          <Button type="primary" @click="runTests" :loading="running" :disabled="running">开始测试</Button>
           <Button @click="saveOnly" :disabled="running">保存</Button>
         </div>
       </div>
@@ -192,21 +192,21 @@ const openManager = async () => {
       <Card>
         <div class="grid items-center gap-8" style="grid-template-columns: 140px minmax(220px, 1fr) 140px minmax(160px, 1fr);">
           <div class="font-bold text-13">延迟地址</div>
-          <Input v-model="settings.delayUrl" allow-paste />
+          <Input v-model="settings.delayUrl" allow-paste :disabled="running" />
           <div class="font-bold text-13">延迟超时(ms)</div>
-          <Input v-model="settings.delayTimeout" type="number" editable />
+          <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
           <div class="font-bold text-13">测速地址</div>
-          <Input v-model="settings.speedUrl" allow-paste />
+          <Input v-model="settings.speedUrl" allow-paste :disabled="running" />
           <div class="font-bold text-13">测速超时(ms)</div>
-          <Input v-model="settings.speedTimeout" type="number" editable />
+          <Input v-model="settings.speedTimeout" type="number" editable :disabled="running" />
           <div class="font-bold text-13">测速字节数</div>
-          <Input v-model="settings.speedBytes" type="number" editable />
+          <Input v-model="settings.speedBytes" type="number" editable :disabled="running" />
           <div class="font-bold text-13">历史保留</div>
-          <Input v-model="settings.historyLimit" type="number" editable />
+          <Input v-model="settings.historyLimit" type="number" editable :disabled="running" />
           <div class="font-bold text-13">旁路当前 TUN</div>
-          <Switch v-model="settings.bypassTun">启用</Switch>
+          <Switch v-model="settings.bypassTun" :disabled="running">启用</Switch>
           <div class="font-bold text-13">物理接口</div>
-          <Input v-model="settings.bindInterface" placeholder="自动检测，或手动填 en0/en12" allow-paste />
+          <Input v-model="settings.bindInterface" placeholder="自动检测，或手动填 en0/en12" allow-paste :disabled="running" />
           <div class="text-12 opacity-70" style="grid-column: 2 / -1;">
             默认延迟地址使用 Cloudflare CP；默认测速地址使用 Cloudflare speedtest 下载文件。启用旁路时会自动检测默认物理接口，也可手动填写。
           </div>
@@ -221,9 +221,9 @@ const openManager = async () => {
               <div class="text-12 opacity-70">已选 {{ selectedNodeCount }} / {{ preview.nodes.length }}</div>
             </div>
             <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 300px; overflow-y: auto;">
-              <label v-for="node in preview.nodes" :key="node.tag" class="rounded-4 p-8 cursor-pointer" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+              <label v-for="node in preview.nodes" :key="node.tag" class="rounded-4 p-8" :class="{ 'cursor-pointer': !running }" style="border: 1px solid #cbd5e1; background: #f8fafc;">
                 <div class="flex items-start gap-8">
-                  <input type="checkbox" :value="node.tag" v-model="settings.selectedNodeTags" />
+                  <input type="checkbox" :value="node.tag" v-model="settings.selectedNodeTags" :disabled="running" />
                   <div class="min-w-0">
                     <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
                     <div class="text-11 opacity-70">{{ node.type }}</div>
@@ -241,9 +241,9 @@ const openManager = async () => {
               <div class="text-12 opacity-70">已选 {{ selectedGroupCount }} / {{ preview.groups.length }}</div>
             </div>
             <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: 300px; overflow-y: auto;">
-              <label v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8 cursor-pointer" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+              <label v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8" :class="{ 'cursor-pointer': !running }" style="border: 1px solid #cbd5e1; background: #f8fafc;">
                 <div class="flex items-start gap-8">
-                  <input type="checkbox" :value="group.tag" v-model="settings.selectedGroupTags" />
+                  <input type="checkbox" :value="group.tag" v-model="settings.selectedGroupTags" :disabled="running" />
                   <div class="min-w-0">
                     <div class="font-bold text-12 truncate" :title="group.tag">{{ group.tag }}</div>
                     <div class="text-11 opacity-70">{{ group.outbounds.length }} 个节点</div>
