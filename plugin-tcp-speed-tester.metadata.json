@@ -1,9 +1,9 @@
 {
   "id": "plugin-tcp-speed-tester",
   "name": "TCP 延迟与测速",
-  "version": "v1.0.10",
+  "version": "v1.1.0",
   "group": "Extensions",
-  "description": "选择节点执行 TCP 连接延迟与下载测速，支持尽量旁路当前 TUN，并在检测到 TUN 风险时提示确认。 作者：SenreySong",
+  "description": "选择节点通过当前运行核心执行 TCP 延迟与下载测速，启动前注入测速入口和 selector 策略组，测速时切换策略组并记录历史结果。 作者：SenreySong",
   "tags": [
     "实用工具",
     "功能扩展",
@@ -13,7 +13,9 @@
   "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-tcp-speed-tester.js",
   "path": "data/plugins/plugin-tcp-speed-tester.js",
   "triggers": [
-    "on::manual"
+    "on::manual",
+    "on::ready",
+    "on::before::core::start"
   ],
   "hasUI": true,
   "menus": {},

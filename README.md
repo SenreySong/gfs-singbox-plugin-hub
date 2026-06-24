@@ -72,6 +72,7 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 - 处理 1.14 相关 DNS/TUN/HTTP/ACME 配置迁移。
 - 支持强制类转换和推荐类转换的分区展示。
 - 支持通过功能开关注入新配置能力。
+- 启动时在克隆配置上执行迁移；插件关闭、仅预览或核心非测试版时，会恢复上次迁移前配置。
 - 核心运行中可查看 `data/sing-box/config.json` 的完整运行时配置，方便确认转换效果。
 
 ### TCP 延迟与测速
@@ -91,9 +92,10 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 - 测速地址、延迟地址和超时均可自定义。
 - 测试按节点队列逐个执行，不做并发测速。
 - 测试结果持久化保存，方便多次对比。
-- 测试时启动独立临时 sing-box 核心，不修改当前运行核心。
-- 默认启用尽量旁路当前 TUN，自动检测系统默认物理接口并写入 `bind_interface` / `route.default_interface`，也可手动指定接口名。
-- 如果当前生成配置包含 TUN 入站，插件会明确提示测速结果可能受正在运行的系统级 TUN 影响；插件不会自动关闭 GFS 的 TUN 模式。
+- 核心启动前注入 `127.0.0.1:7899` HTTP 测速入站和 `__tcp_speed_test__` selector 策略组。
+- 测速时通过当前核心 Clash API 切换 `__tcp_speed_test__` 到待测节点，并通过测速入站发起下载请求。
+- 修改测速入口端口、节点订阅或节点配置后，需要重启核心让注入配置重新生效。
+- 不再启动独立临时核心，也不再尝试旁路当前 TUN；测速结果按当前核心的真实出站链路计算。
 
 ## 文件结构
 

@@ -3,6 +3,9 @@ const SETTINGS_FILE = DATA_DIR + '/settings.json'
 const HISTORY_FILE = DATA_DIR + '/history.json'
 const DEFAULT_DELAY_URL = 'https://cp.cloudflare.com/generate_204'
 const DEFAULT_SPEED_URL = 'https://speed.cloudflare.com/__down?bytes=25000000'
+const TEST_INBOUND_TAG = '__tcp_speed_test_http__'
+const TEST_SELECTOR_TAG = '__tcp_speed_test__'
+const DEFAULT_TEST_PORT = 7899
 const TEST_OUTBOUND_TYPES = new Set([
   'shadowsocks',
   'vmess',
@@ -25,47 +28,9 @@ const DEFAULT_SETTINGS = {
   speedUrl: DEFAULT_SPEED_URL,
   delayTimeout: 5000,
   speedTimeout: 20000,
+  testPort: DEFAULT_TEST_PORT,
   historyLimit: 200,
-  bypassTun: true,
-  bindInterface: '',
   selectedNodeTags: []
-}
-const BASE_CONFIG = {
-  log: {
-    level: 'warn',
-    timestamp: true
-  },
-  dns: {
-    servers: [
-      {
-        tag: 'tcp-speed-dns',
-        type: 'https',
-        server: 'dns.alidns.com',
-        domain_resolver: 'tcp-speed-hosts'
-      },
-      {
-        tag: 'tcp-speed-hosts',
-        type: 'hosts',
-        predefined: {
-          'dns.alidns.com': ['223.5.5.5', '223.6.6.6']
-        }
-      }
-    ],
-    final: 'tcp-speed-dns'
-  },
-  inbounds: [],
-  outbounds: [],
-  route: {
-    auto_detect_interface: true,
-    default_domain_resolver: 'tcp-speed-dns',
-    final: 'direct'
-  },
-  experimental: {
-    clash_api: {
-      external_controller: '',
-      secret: ''
-    }
-  }
 }
 
 const clone = (value) => JSON.parse(JSON.stringify(value))
@@ -73,8 +38,7 @@ const clone = (value) => JSON.parse(JSON.stringify(value))
 window[Plugin.id] = window[Plugin.id] || {
   settings: Vue.ref(clone(DEFAULT_SETTINGS)),
   history: Vue.ref([]),
-  loaded: false,
-  runtime: null
+  loaded: false
 }
 
 const getState = () => window[Plugin.id]
@@ -145,9 +109,8 @@ const normalizeSettings = (settings) => ({
   speedUrl: String(settings?.speedUrl || DEFAULT_SPEED_URL).trim(),
   delayTimeout: normalizePositiveInteger(settings?.delayTimeout, DEFAULT_SETTINGS.delayTimeout, 1000, 60000),
   speedTimeout: normalizePositiveInteger(settings?.speedTimeout, DEFAULT_SETTINGS.speedTimeout, 3000, 120000),
+  testPort: normalizePositiveInteger(settings?.testPort, DEFAULT_SETTINGS.testPort, 1024, 65535),
   historyLimit: normalizePositiveInteger(settings?.historyLimit, DEFAULT_SETTINGS.historyLimit, 20, 1000),
-  bypassTun: settings?.bypassTun !== false,
-  bindInterface: String(settings?.bindInterface || '').trim(),
   selectedNodeTags: uniqueStrings(settings?.selectedNodeTags)
 })
 
@@ -157,6 +120,17 @@ const onReady = async () => {
 
 const onRun = async () => {
   await openManager()
+}
+
+const onBeforeCoreStart = async (config) => {
+  const settings = await loadSettingsForHook()
+  injectCurrentCoreSpeedTest(config, settings)
+  return config
+}
+
+const loadSettingsForHook = async () => {
+  if (getState().loaded) return normalizeSettings(getState().settings.value)
+  return await readSettings()
 }
 
 const openManager = async () => {
@@ -180,9 +154,7 @@ const openManager = async () => {
           <div class="flex gap-6 text-11" style="flex-wrap: wrap;">
             <span class="rounded-4 px-8 py-3" style="background: #eff6ff; color: #1d4ed8;">节点 {{ preview.nodes.length }}</span>
             <span class="rounded-4 px-8 py-3" style="background: #ecfdf5; color: #047857;">已选 {{ selectedNodeCount }}</span>
-            <span class="rounded-4 px-8 py-3" :style="preview.hasTunInbound ? 'background: #fffbeb; color: #92400e;' : 'background: #f1f5f9; color: #475569;'">
-              {{ preview.hasTunInbound ? '检测到 TUN' : '未检测到 TUN' }}
-            </span>
+            <span class="rounded-4 px-8 py-3" style="background: #f1f5f9; color: #475569;">入口 127.0.0.1:{{ settings.testPort }}</span>
           </div>
         </div>
         <div class="flex gap-8" style="flex-shrink: 0;">
@@ -211,22 +183,15 @@ const openManager = async () => {
                 <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
                 <div class="text-12 opacity-70">测速超时</div>
                 <Input v-model="settings.speedTimeout" type="number" editable :disabled="running" />
+                <div class="text-12 opacity-70">入口端口</div>
+                <Input v-model="settings.testPort" type="number" editable :disabled="running" />
                 <div class="text-12 opacity-70">历史保留</div>
                 <Input v-model="settings.historyLimit" type="number" editable :disabled="running" />
               </div>
             </div>
           </div>
-          <div class="grid items-center gap-8" style="grid-template-columns: 128px 96px 76px minmax(160px, 1fr);">
-            <div class="font-bold text-13" style="color: #0f172a;">尽量旁路当前 TUN</div>
-            <Switch v-model="settings.bypassTun" :disabled="running">启用</Switch>
-            <div class="text-12 opacity-70">物理接口</div>
-            <Input v-model="settings.bindInterface" placeholder="自动检测，或手动填 en0/en12" allow-paste :disabled="running" />
-          </div>
-          <div class="text-12 opacity-70">
-            旁路只会让临时测速核心尽量绑定物理接口，无法关闭或完全绕过 GFS 正在运行的系统级 TUN。
-          </div>
-          <div v-if="preview.hasTunInbound" class="rounded-4 p-8 text-12" style="grid-column: 1 / -1; border: 1px solid #f59e0b; background: #fffbeb; color: #92400e;">
-            检测到当前生成配置包含 TUN 入站。插件不会自动关闭 GFS 的 TUN 模式；开启 TUN 时测速请求可能被系统路由影响，建议关闭 TUN 模式后再测。
+          <div class="rounded-4 p-8 text-12" style="border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af;">
+            插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b> 和 selector 策略组 <b>{{ speedSelectorTag }}</b>。修改端口或节点订阅后需要重启核心生效；测速时会切换该策略组，不再启动临时核心。
           </div>
         </div>
       </Card>
@@ -400,7 +365,6 @@ const openManager = async () => {
           Plugins.message.warn('请至少选择一个节点')
           return
         }
-        if (!(await confirmTunRisk(preview.value, settings.value))) return
         running.value = true
         runningResults.value = createPendingResults(preview.value.selectedNodes)
         progress.value = {
@@ -438,7 +402,6 @@ const openManager = async () => {
           }
           Plugins.message.error(String(error))
         } finally {
-          await stopRuntime()
           running.value = false
         }
       }
@@ -463,7 +426,12 @@ const openManager = async () => {
         history,
         running,
         summaryText: Vue.computed(() => `当前配置：${preview.value.profileName || '未找到'}，可测节点 ${preview.value.nodes.length} 个`),
-        selectedNodeCount: Vue.computed(() => settings.value.selectedNodeTags.length),
+        selectedNodeCount: Vue.computed(() => {
+          const nodeTags = new Set(preview.value.nodes.map((node) => node.tag))
+          return settings.value.selectedNodeTags.filter((tag) => nodeTags.has(tag)).length
+        }),
+        speedInboundText: Vue.computed(() => `127.0.0.1:${settings.value.testPort}`),
+        speedSelectorTag: TEST_SELECTOR_TAG,
         selectVisibleNodes,
         clearSelectedNodes,
         nodeCardStyle,
@@ -488,7 +456,6 @@ const openManager = async () => {
       height: '88',
       cancelText: '关闭',
       afterClose() {
-        void stopRuntime()
         modal.destroy()
       }
     },
@@ -518,7 +485,6 @@ const buildPreviewContext = async (settings) => {
   return createPreviewContext({
     profileName: profile.name || '',
     sourceConfig: generatedConfig,
-    hasTunInbound: hasEnabledTunInbound(generatedConfig),
     nodes,
     selectedNodes
   })
@@ -527,25 +493,53 @@ const buildPreviewContext = async (settings) => {
 const createPreviewContext = (overrides = {}) => ({
   profileName: '',
   sourceConfig: null,
-  hasTunInbound: false,
   nodes: [],
   selectedNodes: [],
   ...overrides
 })
 
-const hasEnabledTunInbound = (config) => {
-  return toArray(config?.inbounds).some((inbound) => inbound?.type === 'tun' && inbound?.enabled !== false && inbound?.disabled !== true)
+const injectCurrentCoreSpeedTest = (config, settings) => {
+  if (!config || typeof config !== 'object') return
+  const nodes = collectTestNodes(config)
+  const nodeTags = nodes.map((node) => node.tag)
+  if (nodeTags.length === 0) return
+  const inbounds = toArray(config.inbounds).filter((inbound) => inbound?.tag !== TEST_INBOUND_TAG)
+  if (inbounds.some((inbound) => isInboundPortConflict(inbound, settings.testPort))) {
+    Plugins.message.warn(`TCP 测速入口端口 ${settings.testPort} 已被其他入站占用，已跳过测速入口注入`)
+    return
+  }
+  config.inbounds = inbounds
+  config.outbounds = toArray(config.outbounds).filter((outbound) => outbound?.tag !== TEST_SELECTOR_TAG)
+  config.inbounds.push({
+    type: 'http',
+    tag: TEST_INBOUND_TAG,
+    listen: '127.0.0.1',
+    listen_port: settings.testPort
+  })
+  config.outbounds.push({
+    type: 'selector',
+    tag: TEST_SELECTOR_TAG,
+    outbounds: nodeTags,
+    default: nodeTags[0],
+    interrupt_exist_connections: true
+  })
+  if (!config.route) config.route = {}
+  const rules = toArray(config.route.rules)
+    .filter((rule) => !(toArray(rule?.inbound).includes(TEST_INBOUND_TAG) || rule?.inbound === TEST_INBOUND_TAG))
+  config.route.rules = [
+    {
+      inbound: TEST_INBOUND_TAG,
+      action: 'route',
+      outbound: TEST_SELECTOR_TAG
+    }
+  ].concat(rules)
 }
 
-const confirmTunRisk = async (previewContext, settings) => {
-  if (!previewContext?.hasTunInbound) return true
-  const bypassText = settings?.bypassTun
-    ? '当前已启用“尽量旁路当前 TUN”，但它只会给临时测速核心绑定物理接口，不能关闭或完全绕过系统级 TUN。'
-    : '当前未启用“尽量旁路当前 TUN”。'
-  return await Plugins.confirm(
-    'TUN 模式提醒',
-    `${bypassText}\n\n检测到当前生成配置包含 TUN 入站，测速结果可能仍会走正在运行的 TUN，出现多个节点结果接近的情况。建议先关闭 GFS 的 TUN 模式后再测。\n\n仍要继续测速吗？`
-  ).catch(() => false)
+const isInboundPortConflict = (inbound, port) => {
+  const listenPort = Number(inbound?.listen_port)
+  if (!Number.isFinite(listenPort) || listenPort !== Number(port)) return false
+  const listen = String(inbound?.listen || '0.0.0.0').trim().toLowerCase()
+  return ['', '0.0.0.0', '::', '127.0.0.1', 'localhost'].includes(listen)
 }
 
 const getCurrentProfile = () => {
@@ -627,15 +621,18 @@ const updateRunningResult = (results, tag, patch) => {
 const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}) => {
   let completed = 0
   const total = selectedNodes.length
-  const msg = Plugins.message.info('正在启动临时测速核心...', 999999)
+  const msg = Plugins.message.info('正在连接当前核心测速入口...', 999999)
   const results = []
   try {
-    reporter.onStatus?.('正在启动临时测速核心', `${total} 个节点`)
-    const runtime = await startRuntime(sourceConfig, selectedNodes, settings, reporter)
+    reporter.onStatus?.('正在读取当前核心配置', `${total} 个节点`)
+    const runtime = await resolveCurrentCoreRuntime(sourceConfig, settings)
+    await ensureCurrentCoreReady(runtime)
     msg.update?.(`TCP 测试中 0 / ${total}`)
     for (const node of selectedNodes) {
       reporter.onStatus?.(`正在测试 ${node.tag}`, `${completed + 1} / ${total}`)
-      reporter.onNodeStatus?.(node.tag, '准备中')
+      reporter.onNodeStatus?.(node.tag, '切换策略组')
+      await switchSpeedSelector(runtime, node.tag)
+      await Plugins.sleep(200)
       const result = await testSingleNode(runtime, node, settings, reporter)
       results.push(result)
       await reporter.onResult?.(result)
@@ -655,214 +652,74 @@ const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}
   }
 }
 
-const startRuntime = async (sourceConfig, selectedNodes, settings, reporter = {}) => {
-  await stopRuntime()
-  const secret = Plugins.generateSecureKey()
-  reporter.onStatus?.('正在分配测速端口', `${selectedNodes.length} 个节点`)
-  const ports = await getAvailablePorts(selectedNodes.length + 1)
-  const apiPort = ports[0]
-  const httpPorts = ports.slice(1)
-  const controller = `127.0.0.1:${apiPort}`
-  const runtimeDir = `${DATA_DIR}/runtime`
-  const configPath = `${runtimeDir}/config.json`
-  await Plugins.MakeDir(runtimeDir).catch(() => {})
-  const portMap = new Map(selectedNodes.map((node, index) => [node.tag, httpPorts[index]]))
-  reporter.onStatus?.('正在检测旁路接口', settings.bypassTun ? '尽量旁路 TUN 已启用' : '尽量旁路 TUN 已关闭')
-  const bindInterface = await resolveBindInterface(settings)
-  reporter.onStatus?.('正在写入临时配置', bindInterface ? `绑定接口 ${bindInterface}` : '不绑定物理接口')
-  const runtimeConfig = createRuntimeConfig(sourceConfig, selectedNodes, controller, secret, portMap, bindInterface)
-  await Plugins.WriteFile(configPath, JSON.stringify(runtimeConfig, null, 2))
-  const isAlpha = Plugins.useAppSettingsStore().app?.kernel?.branch === 'alpha'
-  const core = await Plugins.getKernelFileName(isAlpha)
-  const [corePath, absoluteConfigPath, workingDir] = await Promise.all([
-    Plugins.AbsolutePath(`data/sing-box/${core}`),
-    Plugins.AbsolutePath(configPath),
-    Plugins.AbsolutePath(runtimeDir)
-  ])
-  const baseUrl = `http://${controller}`
-  reporter.onStatus?.('正在启动临时测速核心', controller)
-  const pid = await runCore(corePath, absoluteConfigPath, workingDir, baseUrl, secret, reporter)
-  const runtime = {
-    pid,
-    configPath,
-    absoluteConfigPath,
-    baseUrl,
-    secret,
-    portMap
-  }
-  getState().runtime = runtime
-  reporter.onStatus?.('临时测速核心已启动', controller)
-  return runtime
-}
-
-const createRuntimeConfig = (sourceConfig, selectedNodes, controller, secret, portMap, bindInterface) => {
-  const nodeBindings = selectedNodes.map((node, index) => ({
-    node,
-    inboundTag: createInboundTag(node, index),
-    port: portMap.get(node.tag)
-  }))
-  const rules = nodeBindings.map((binding) => ({
-    inbound: binding.inboundTag,
-    action: 'route',
-    outbound: binding.node.tag
-  }))
-  const outbounds = collectRuntimeOutbounds(sourceConfig, selectedNodes, bindInterface).concat([
-    {
-      type: 'direct',
-      tag: 'direct'
-    },
-    {
-      type: 'block',
-      tag: 'block'
-    }
-  ])
+const resolveCurrentCoreRuntime = async (sourceConfig, settings) => {
+  const kernelApiStore = Plugins.useKernelApiStore()
+  if (!kernelApiStore.running) throw '当前核心未运行，请启动或重启核心后再测速'
+  const runningConfig = await readRunningConfig()
+  const clashApi = runningConfig?.experimental?.clash_api || sourceConfig?.experimental?.clash_api || {}
+  const controller = normalizeController(clashApi.external_controller)
+  if (!controller) throw '当前核心未启用 Clash API，无法切换测速策略组'
   return {
-    ...clone(BASE_CONFIG),
-    dns: createRuntimeDns(bindInterface),
-    inbounds: nodeBindings.map((binding) => ({
-      type: 'http',
-      tag: binding.inboundTag,
-      listen: '127.0.0.1',
-      listen_port: binding.port
-    })),
-    outbounds,
-    route: {
-      ...clone(BASE_CONFIG.route),
-      default_interface: bindInterface || '',
-      rules,
-      final: 'direct'
-    },
-    experimental: {
-      clash_api: {
-        external_controller: controller,
-        secret
-      }
-    }
+    baseUrl: controller,
+    secret: String(clashApi.secret || ''),
+    proxyUrl: `http://127.0.0.1:${settings.testPort}`
   }
 }
 
-const createInboundTag = (node, index) => {
-  return `test-http-${index + 1}-${safeTag(node.tag)}`
-}
-
-const createRuntimeDns = (bindInterface) => {
-  const dns = clone(BASE_CONFIG.dns)
-  if (!bindInterface) return dns
-  for (const server of dns.servers) {
-    if (server.type === 'hosts' || server.type === 'fakeip') continue
-    server.bind_interface = bindInterface
-  }
-  return dns
-}
-
-const sanitizeOutbound = (outbound, bindInterface) => {
-  const cloned = clone(outbound)
-  cloned.domain_resolver = 'tcp-speed-dns'
-  if (bindInterface) cloned.bind_interface = bindInterface
-  return cloned
-}
-
-const collectRuntimeOutbounds = (sourceConfig, selectedNodes, bindInterface) => {
-  const sourceMap = new Map((sourceConfig?.outbounds || []).filter((outbound) => outbound?.tag).map((outbound) => [outbound.tag, outbound]))
-  const collected = []
-  const seen = new Set()
-  const visit = (tag) => {
-    if (!tag || seen.has(tag)) return
-    const outbound = sourceMap.get(tag)
-    if (!outbound) return
-    seen.add(tag)
-    collected.push(sanitizeOutbound(outbound, bindInterface))
-    if (outbound.detour) visit(outbound.detour)
-  }
-  for (const node of selectedNodes) visit(node.tag)
-  return collected
-}
-
-const runCore = async (corePath, configPath, workingDir, baseUrl, secret, reporter = {}) => {
-  let output = ''
-  let runtimeError = ''
-  const pidTask = Plugins.ExecBackground(
-    corePath,
-    ['run', '--disable-color', '-c', configPath, '-D', workingDir],
-    (out) => {
-      output = `${output}${String(out || '')}`.slice(-4000)
-    },
-    () => {
-      runtimeError = output || '临时核心异常退出'
-    },
-    {
-      StopOutputKeyword: 'sing-box started'
-    }
-  ).catch((error) => {
-    runtimeError = String(error?.message || error)
+const readRunningConfig = async () => {
+  const content = await Plugins.ReadFile('data/sing-box/config.json').catch(() => '')
+  if (!content) return null
+  try {
+    return JSON.parse(content)
+  } catch {
     return null
-  })
-  await waitForCoreReady(baseUrl, secret, () => runtimeError, reporter)
-  return await Promise.race([
-    pidTask,
-    Plugins.sleep(500).then(() => null)
-  ]) || await findRuntimePid(configPath)
+  }
 }
 
-const waitForCoreReady = async (baseUrl, secret, getRuntimeError, reporter = {}) => {
-  const deadline = Date.now() + 12000
-  let lastError = ''
-  let attempts = 0
-  while (Date.now() < deadline) {
-    attempts += 1
-    reporter.onStatus?.('等待临时核心 API 就绪', `${attempts} 次`)
-    const runtimeError = getRuntimeError?.()
-    if (runtimeError) throw runtimeError
-    try {
-      const { status, body } = await Plugins.Requests({
-        method: 'GET',
-        url: `${baseUrl}/proxies`,
-        autoTransformBody: false,
-        headers: {
-          Authorization: `Bearer ${secret}`
-        },
-        options: {
-          Proxy: '',
-          Timeout: 1000
-        }
-      })
-      if (status >= 200 && status < 300) return
-      lastError = `HTTP ${status}${body ? ` ${String(body).slice(0, 120)}` : ''}`
-    } catch (error) {
-      lastError = String(error?.message || error)
+const normalizeController = (controller) => {
+  const value = String(controller || '').trim()
+  if (!value) return ''
+  if (/^https?:\/\//i.test(value)) return value.replace(/\/+$/, '')
+  return `http://${value.replace(/\/+$/, '')}`
+}
+
+const ensureCurrentCoreReady = async (runtime) => {
+  const { status, body } = await requestClashApi(runtime, 'GET', '/proxies', null, 3000)
+  if (status < 200 || status >= 300) throw `当前核心 Clash API 不可用：${status}`
+  const proxies = parseClashProxies(body)
+  if (!Object.prototype.hasOwnProperty.call(proxies, TEST_SELECTOR_TAG)) {
+    throw `当前核心未加载测速策略组 ${TEST_SELECTOR_TAG}，请保存插件设置并重启核心后再测速`
+  }
+}
+
+const switchSpeedSelector = async (runtime, tag) => {
+  const { status, body } = await requestClashApi(
+    runtime,
+    'PUT',
+    `/proxies/${encodeURIComponent(TEST_SELECTOR_TAG)}`,
+    { name: tag },
+    3000
+  )
+  if (status < 200 || status >= 300) {
+    throw `切换测速策略组失败：${status}${body ? ` ${String(body).slice(0, 120)}` : ''}`
+  }
+}
+
+const requestClashApi = async (runtime, method, path, body = null, timeout = 3000) => {
+  const headers = {}
+  if (runtime.secret) headers.Authorization = `Bearer ${runtime.secret}`
+  if (body !== null) headers['Content-Type'] = 'application/json'
+  return await Plugins.Requests({
+    method,
+    url: `${runtime.baseUrl}${path}`,
+    body: body === null ? undefined : JSON.stringify(body),
+    autoTransformBody: false,
+    headers,
+    options: {
+      Proxy: '',
+      Timeout: timeout
     }
-    await Plugins.sleep(250)
-  }
-  throw `临时测速核心启动超时${lastError ? `：${lastError}` : ''}`
-}
-
-const findRuntimePid = async (configPath) => {
-  const pgrepOutput = await Plugins.Exec('pgrep', ['-f', configPath]).catch(() => '')
-  const pgrepPid = parsePid(pgrepOutput)
-  if (pgrepPid) return pgrepPid
-  const psOutput = await Plugins.Exec('ps', ['ax', '-o', 'pid=', '-o', 'command=']).catch(() => '')
-  for (const line of String(psOutput).split('\n')) {
-    if (!line.includes(configPath) || !line.includes('sing-box')) continue
-    const pid = parsePid(line)
-    if (pid) return pid
-  }
-  return null
-}
-
-const parsePid = (value) => {
-  const matched = String(value || '').match(/\b(\d+)\b/)
-  if (!matched) return null
-  const pid = Number(matched[1])
-  return Number.isInteger(pid) && pid > 0 ? pid : null
-}
-
-const stopRuntime = async () => {
-  const runtime = getState().runtime
-  if (!runtime) return
-  const pid = runtime.pid || await findRuntimePid(runtime.absoluteConfigPath || runtime.configPath)
-  if (pid) await Plugins.KillProcess(pid).catch(() => {})
-  if (runtime.configPath) await Plugins.RemoveFile(runtime.configPath).catch(() => {})
-  getState().runtime = null
+  })
 }
 
 const testSingleNode = async (runtime, node, settings, reporter = {}) => {
@@ -884,11 +741,11 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   try {
     reporter.onStatus?.(`正在测试 ${node.tag}`, 'TCP 延迟')
     reporter.onNodeStatus?.(node.tag, 'TCP 延迟')
-    const tcpDelayMs = await testTcpDelay(runtime, node.tag, settings)
+    const tcpDelayMs = await testTcpDelay(runtime, settings)
     reporter.onResultPatch?.(node.tag, { tcpDelayMs })
     reporter.onStatus?.(`正在测试 ${node.tag}`, `下载测速，延迟 ${tcpDelayMs} ms`)
     reporter.onNodeStatus?.(node.tag, '下载测速')
-    const speed = await testDownloadSpeed(getNodeProxyUrl(runtime, node.tag), settings)
+    const speed = await testDownloadSpeed(runtime.proxyUrl, settings)
     return {
       ...base,
       tcpDelayMs,
@@ -905,30 +762,34 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   }
 }
 
-const testTcpDelay = async (runtime, tag, settings) => {
-  const url = new URL(`${runtime.baseUrl}/proxies/${encodeURIComponent(tag)}/delay`)
+const testTcpDelay = async (runtime, settings) => {
+  const url = new URL(`${runtime.baseUrl}/proxies/${encodeURIComponent(TEST_SELECTOR_TAG)}/delay`)
   url.searchParams.append('url', settings.delayUrl)
   url.searchParams.append('timeout', String(settings.delayTimeout))
-  const { status, body } = await Plugins.Requests({
-    method: 'GET',
-    url: url.toString(),
-    autoTransformBody: false,
-    headers: {
-      Authorization: `Bearer ${runtime.secret}`
-    },
-    options: {
-      Proxy: '',
-      Timeout: Number(settings.delayTimeout) + 1000
-    }
-  })
+  const { status, body } = await requestClashApi(runtime, 'GET', `${url.pathname}${url.search}`, null, Number(settings.delayTimeout) + 1000)
   if (status < 200 || status >= 300) {
     throw `TCP 延迟接口失败：${status}`
   }
-  const delay = JSON.parse(body).delay
+  const delay = Number(parseJson(body)?.delay)
   if (!Number.isFinite(delay) || delay <= 0) {
     throw 'TCP 延迟测试失败'
   }
   return Math.round(delay)
+}
+
+const parseClashProxies = (body) => {
+  const payload = parseJson(body)
+  const proxies = payload?.proxies || payload
+  return proxies && typeof proxies === 'object' ? proxies : {}
+}
+
+const parseJson = (value) => {
+  if (value && typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value || '{}'))
+  } catch {
+    return null
+  }
 }
 
 const testDownloadSpeed = async (proxyUrl, settings) => {
@@ -953,52 +814,6 @@ const testDownloadSpeed = async (proxyUrl, settings) => {
     durationMs,
     speedMbps
   }
-}
-
-const getNodeProxyUrl = (runtime, tag) => {
-  const port = runtime.portMap.get(tag)
-  if (!port) throw `未找到节点 ${tag} 的测试端口`
-  return `http://127.0.0.1:${port}`
-}
-
-const getAvailablePorts = async (count) => {
-  let out = ''
-  try {
-    out = await Plugins.Exec('ss', ['-tuln'])
-  } catch {
-    out = await Plugins.Exec('netstat', ['-anv']).catch(() => '')
-  }
-  const portRegex = /(?:\[[a-fA-F0-9:]+\]|[\d.]+)(?::|\.)(\d+)/g
-  const occupiedPorts = new Set()
-  let match
-  while ((match = portRegex.exec(out)) !== null) {
-    occupiedPorts.add(parseInt(match[1], 10))
-  }
-  const ports = []
-  while (ports.length < count) {
-    const port = Math.floor(Math.random() * (65535 - 1024 + 1)) + 1024
-    if (!occupiedPorts.has(port) && !ports.includes(port)) ports.push(port)
-  }
-  return ports
-}
-
-const resolveBindInterface = async (settings) => {
-  if (!settings?.bypassTun) return ''
-  if (settings.bindInterface) return settings.bindInterface
-  return getDefaultInterface()
-}
-
-const getDefaultInterface = async () => {
-  const routeOutput = await Plugins.Exec('route', ['-n', 'get', 'default']).catch(() => '')
-  const matched = String(routeOutput).match(/interface:\s*([^\s]+)/)
-  return matched?.[1] || ''
-}
-
-const safeTag = (tag) => {
-  return String(tag || '')
-    .replace(/[^\w.-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64) || Plugins.sampleID()
 }
 
 const estimateBodyBytes = (body) => {
@@ -1051,5 +866,6 @@ const toArray = (value) => Array.isArray(value) ? value : value === undefined ||
 
 export default {
   onReady,
-  onRun
+  onRun,
+  onBeforeCoreStart
 }

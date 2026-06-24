@@ -1,5 +1,6 @@
 const DATA_DIR = 'data/third/singbox-beta-migrator'
 const SETTINGS_FILE = DATA_DIR + '/settings.json'
+const STATE_FILE = DATA_DIR + '/state.json'
 
 const RUN_MODES = [
   '仅测试版核心,beta_only',
@@ -201,6 +202,29 @@ const saveSettings = async (settings) => {
   await Plugins.WriteFile(SETTINGS_FILE, JSON.stringify(normalizeSettings(settings), null, 2))
 }
 
+const readMigrationState = async () => {
+  await ensureDataFile()
+  if (!(await Plugins.FileExists(STATE_FILE).catch(() => false))) return null
+  const content = await Plugins.ReadFile(STATE_FILE).catch(() => '')
+  if (!content) return null
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
+const writeMigrationState = async (state) => {
+  await ensureDataFile()
+  await Plugins.WriteFile(STATE_FILE, JSON.stringify(state, null, 2))
+}
+
+const clearMigrationState = async () => {
+  if (await Plugins.FileExists(STATE_FILE).catch(() => false)) {
+    await Plugins.RemoveFile(STATE_FILE).catch(() => {})
+  }
+}
+
 const loadSettings = async () => {
   if (!getState().loaded) {
     getState().settings.value = await readSettings()
@@ -246,17 +270,63 @@ const onRun = async () => {
 
 const onBeforeCoreStart = async (config) => {
   const settings = await loadSettings()
-  if (!settings.enabled || settings.runMode === 'preview_only') return config
   const kernelInfo = await getKernelInfo(settings)
-  const shouldApply = settings.runMode === 'always' || kernelInfo.isPrerelease
-  if (!shouldApply) return config
+  const shouldApply = settings.enabled &&
+    settings.runMode !== 'preview_only' &&
+    (settings.runMode === 'always' || kernelInfo.isPrerelease)
+  if (!shouldApply) {
+    return await restoreConfigIfNeeded(config, settings, kernelInfo)
+  }
 
-  const report = applyMigrations(config, settings, { mutate: true, kernelInfo })
+  const originalConfig = clone(config || {})
+  const migratedConfig = clone(config || {})
+  const report = applyMigrations(migratedConfig, settings, { mutate: true, kernelInfo })
   getState().preview.value = report
+  if (report.totalApplied > 0) {
+    await writeMigrationState({
+      version: Plugin.version || '',
+      appliedAt: Date.now(),
+      kernel: kernelInfo,
+      runMode: settings.runMode,
+      originalConfig,
+      migratedConfig
+    })
+  } else {
+    await clearMigrationState()
+  }
   if (settings.notifyOnApply && report.totalApplied > 0) {
     Plugins.message.info(`测试版核心兼容转换已应用 ${report.totalApplied} 项`)
   }
+  return migratedConfig
+}
+
+const restoreConfigIfNeeded = async (config, settings, kernelInfo) => {
+  const migrationState = await readMigrationState()
+  if (migrationState?.migratedConfig && isSameConfig(config, migrationState.migratedConfig)) {
+    await clearMigrationState()
+    if (settings.notifyOnApply) {
+      Plugins.message.info(`测试版核心配置迁移已跳过，已恢复上次迁移前配置：${formatSkipReason(settings, kernelInfo)}`)
+    }
+    return clone(migrationState.originalConfig || {})
+  }
   return config
+}
+
+const formatSkipReason = (settings, kernelInfo) => {
+  if (!settings.enabled) return '插件已关闭'
+  if (settings.runMode === 'preview_only') return '仅预览模式'
+  if (settings.runMode === 'beta_only' && !kernelInfo.isPrerelease) {
+    return `当前核心不是测试版${kernelInfo.version ? `（${kernelInfo.version}）` : ''}`
+  }
+  return '当前条件不需要迁移'
+}
+
+const isSameConfig = (left, right) => {
+  try {
+    return JSON.stringify(left || {}) === JSON.stringify(right || {})
+  } catch {
+    return false
+  }
 }
 
 const applyMigrations = (config, settings, options = {}) => {
