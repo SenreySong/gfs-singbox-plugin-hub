@@ -709,10 +709,23 @@ const requestClashApi = async (runtime, method, path, body = null, timeout = 300
   const headers = {}
   if (runtime.secret) headers.Authorization = `Bearer ${runtime.secret}`
   if (body !== null) headers['Content-Type'] = 'application/json'
+  const url = `${runtime.baseUrl}${path}`
+  const options = {
+    Timeout: timeout
+  }
+  if (body !== null && method === 'PUT') {
+    return await Plugins.HttpPut(url, headers, body, options)
+  }
+  if (body !== null && method === 'POST') {
+    return await Plugins.HttpPost(url, headers, body, options)
+  }
+  if (body !== null && method === 'PATCH') {
+    return await Plugins.HttpPatch(url, headers, body)
+  }
   return await Plugins.Requests({
     method,
-    url: `${runtime.baseUrl}${path}`,
-    body: body === null ? undefined : JSON.stringify(body),
+    url,
+    body: body === null ? undefined : body,
     autoTransformBody: false,
     headers,
     options: {
