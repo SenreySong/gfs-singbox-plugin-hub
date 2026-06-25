@@ -519,6 +519,7 @@ const injectCurrentCoreSpeedTest = (config, settings) => {
   config.outbounds.push({
     type: 'selector',
     tag: TEST_SELECTOR_TAG,
+    hidden: true,
     outbounds: nodeTags,
     default: nodeTags[0],
     interrupt_exist_connections: true
