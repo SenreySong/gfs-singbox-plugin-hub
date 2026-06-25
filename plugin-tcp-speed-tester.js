@@ -1,6 +1,7 @@
 const DATA_DIR = 'data/third/tcp-speed-tester'
 const SETTINGS_FILE = DATA_DIR + '/settings.json'
 const HISTORY_FILE = DATA_DIR + '/history.json'
+const CHECK_CONFIG_FILE = DATA_DIR + '/check-config.json'
 const DEFAULT_DELAY_URL = 'https://cp.cloudflare.com/generate_204'
 const DEFAULT_SPEED_URL = 'https://speed.cloudflare.com/__down?bytes=25000000'
 const TEST_INBOUND_TAG = '__tcp_speed_test_http__'
@@ -24,6 +25,7 @@ const TEST_OUTBOUND_TYPES = new Set([
 ])
 const EXCLUDED_OUTBOUND_TAGS = new Set(['direct', 'Direct', 'block', 'Block', 'dns', 'DNS'])
 const DEFAULT_SETTINGS = {
+  injectOnCoreStart: false,
   delayUrl: DEFAULT_DELAY_URL,
   speedUrl: DEFAULT_SPEED_URL,
   delayTimeout: 5000,
@@ -105,6 +107,7 @@ const loadState = async () => {
 }
 
 const normalizeSettings = (settings) => ({
+  injectOnCoreStart: settings?.injectOnCoreStart === true,
   delayUrl: String(settings?.delayUrl || DEFAULT_DELAY_URL).trim(),
   speedUrl: String(settings?.speedUrl || DEFAULT_SPEED_URL).trim(),
   delayTimeout: normalizePositiveInteger(settings?.delayTimeout, DEFAULT_SETTINGS.delayTimeout, 1000, 60000),
@@ -123,8 +126,20 @@ const onRun = async () => {
 }
 
 const onBeforeCoreStart = async (config) => {
-  const settings = await loadSettingsForHook()
-  injectCurrentCoreSpeedTest(config, settings)
+  try {
+    const settings = await loadSettingsForHook()
+    if (!settings.injectOnCoreStart) return config
+    const nextConfig = clone(config)
+    injectCurrentCoreSpeedTest(nextConfig, settings)
+    const checkResult = await checkSingBoxConfig(nextConfig)
+    if (!checkResult.ok) {
+      Plugins.message.warn(`TCP 延迟与测速注入已跳过：${checkResult.message}`)
+      return config
+    }
+    return nextConfig
+  } catch (error) {
+    Plugins.message.warn(`TCP 延迟与测速注入已跳过：${String(error?.message || error)}`)
+  }
   return config
 }
 
@@ -183,6 +198,8 @@ const openManager = async () => {
                 <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
                 <div class="text-12 opacity-70">测速超时</div>
                 <Input v-model="settings.speedTimeout" type="number" editable :disabled="running" />
+                <div class="text-12 opacity-70">启动注入</div>
+                <Switch v-model="settings.injectOnCoreStart" :disabled="running">启用</Switch>
                 <div class="text-12 opacity-70">入口端口</div>
                 <Input v-model="settings.testPort" type="number" editable :disabled="running" />
                 <div class="text-12 opacity-70">历史保留</div>
@@ -191,7 +208,7 @@ const openManager = async () => {
             </div>
           </div>
           <div class="rounded-4 p-8 text-12" style="border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af;">
-            插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b> 和 selector 策略组 <b>{{ speedSelectorTag }}</b>。修改端口或节点订阅后需要重启核心生效；测速时会切换该策略组，不再启动临时核心。
+            开启启动注入后，插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b> 和 selector 策略组 <b>{{ speedSelectorTag }}</b>。默认不注入，避免启用插件本身影响核心启动；修改开关、端口或节点订阅后需要重启核心生效。
           </div>
         </div>
       </Card>
@@ -365,6 +382,10 @@ const openManager = async () => {
           Plugins.message.warn('请至少选择一个节点')
           return
         }
+        if (!settings.value.injectOnCoreStart) {
+          Plugins.message.warn('请先开启启动注入并重启核心后再测速')
+          return
+        }
         running.value = true
         runningResults.value = createPendingResults(preview.value.selectedNodes)
         progress.value = {
@@ -519,7 +540,6 @@ const injectCurrentCoreSpeedTest = (config, settings) => {
   config.outbounds.push({
     type: 'selector',
     tag: TEST_SELECTOR_TAG,
-    hidden: true,
     outbounds: nodeTags,
     default: nodeTags[0],
     interrupt_exist_connections: true
@@ -534,6 +554,31 @@ const injectCurrentCoreSpeedTest = (config, settings) => {
       outbound: TEST_SELECTOR_TAG
     }
   ].concat(rules)
+}
+
+const checkSingBoxConfig = async (config) => {
+  await ensureDataDir()
+  await Plugins.WriteFile(CHECK_CONFIG_FILE, JSON.stringify(config, null, 2))
+  try {
+    const appSettingsStore = Plugins.useAppSettingsStore()
+    const branch = appSettingsStore.app?.kernel?.branch
+    const kernelFileName = await Plugins.getKernelFileName(branch !== 'main')
+    const kernelFilePath = await Plugins.AbsolutePath('data/sing-box/' + kernelFileName)
+    const workingDirectory = await Plugins.AbsolutePath('data/sing-box')
+    await Plugins.Exec(kernelFilePath, ['check', '-D', workingDirectory, '-c', await Plugins.AbsolutePath(CHECK_CONFIG_FILE)])
+    return { ok: true, message: '' }
+  } catch (error) {
+    return {
+      ok: false,
+      message: normalizeCheckError(error)
+    }
+  }
+}
+
+const normalizeCheckError = (error) => {
+  const text = String(error?.message || error || '').trim()
+  if (!text) return 'sing-box 配置检查失败'
+  return text.replace(/\u001b\[[0-9;]*m/g, '').split('\n').slice(0, 3).join(' ')
 }
 
 const isInboundPortConflict = (inbound, port) => {

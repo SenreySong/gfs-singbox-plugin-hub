@@ -62,6 +62,7 @@ const DEFAULT_SETTINGS = {
 }
 const BASE_MANAGED_GROUP_TAGS = new Set(DEFAULT_GROUPS.map((group) => group.tag).concat(DEFAULT_OTHER_GROUP_TAG))
 const EXCLUDED_TYPES = new Set(['selector', 'urltest', 'direct', 'block', 'dns'])
+const INTERNAL_SELECTOR_TAGS = new Set(['__tcp_speed_test__'])
 
 const initState = () => {
   window[Plugin.id] = window[Plugin.id] || {}
@@ -315,6 +316,7 @@ const getHiddenSelectorTags = (profile) => {
 const shouldPatchSelector = (outbound, generatedGroupTags, hiddenSelectorTags, settings) => {
   if (!outbound || outbound.type !== 'selector') return false
   if (generatedGroupTags.has(outbound.tag)) return false
+  if (INTERNAL_SELECTOR_TAGS.has(outbound.tag)) return false
   if (settings.skipHiddenSelectors && hiddenSelectorTags.has(outbound.tag)) return false
   return true
 }
