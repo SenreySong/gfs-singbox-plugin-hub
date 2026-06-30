@@ -333,7 +333,10 @@ const openManager = async (profile) => {
         <div class="text-12" style="color: #64748b;">
           保存内容只写入插件目录，不修改订阅和 GUI 配置；核心启动前会按当前配置写入 detour。
         </div>
-        <Button type="text" @click="clearRelays">清空当前配置中转</Button>
+        <div class="flex items-center gap-8">
+          <Button v-if="unavailableRuleCount > 0" @click="clearUnavailableRules">清理失效配置 {{ unavailableRuleCount }}</Button>
+          <Button type="text" @click="clearRelays">清空当前配置中转</Button>
+        </div>
       </div>
     </div>
     `,
@@ -413,6 +416,11 @@ const openManager = async (profile) => {
       const removeRule = (rule) => {
         const index = rules.value.findIndex((item) => item.id === rule.id)
         if (index >= 0) rules.value.splice(index, 1)
+      }
+
+      const isUnavailableRule = (rule) => {
+        if (!rule.relayTag) return false
+        return !context.outboundByTag.has(rule.sourceTag) || !context.outboundByTag.has(rule.relayTag)
       }
 
       const validateDraftRelay = (sourceTag, relayTag, currentRuleId = '') => {
@@ -678,6 +686,18 @@ const openManager = async (profile) => {
         rules.value = []
       }
 
+      const clearUnavailableRules = async () => {
+        const count = rules.value.filter(isUnavailableRule).length
+        if (count === 0) return
+        const confirmed = await Plugins.confirm(
+          '清理失效配置',
+          `确定删除当前配置中 ${count} 条源节点或中转节点不存在的中转规则吗？`
+        ).catch(() => false)
+        if (!confirmed) return
+        rules.value = rules.value.filter((rule) => !isUnavailableRule(rule))
+        await save()
+      }
+
       const save = async () => {
         const normalized = normalizeRules(rules.value)
         validateRulesForSave(normalized, context)
@@ -700,6 +720,7 @@ const openManager = async (profile) => {
         rules,
         filteredRules,
         availableSourceCount: computed(() => availableSourceOptions.value.length),
+        unavailableRuleCount: computed(() => rules.value.filter(isUnavailableRule).length),
         relayButtonStyle,
         getOutboundType,
         getRegionLabel,
@@ -711,6 +732,7 @@ const openManager = async (profile) => {
         removeRule,
         openAddRulePicker,
         openRelayPicker,
+        clearUnavailableRules,
         clearRelays,
         save
       }
@@ -739,7 +761,6 @@ const ensureRows = (storedRules, context, profileId) => {
   return normalizeRules(storedRules)
     .filter((rule) => rule.profileId === profileId)
     .filter((rule) => rule.relayTag)
-    .filter((rule) => context.outboundByTag.has(rule.sourceTag))
     .sort((left, right) => compareTagByRegion(left.sourceTag, right.sourceTag))
     .map((rule) => ({
       id: rule.id || Plugins.sampleID(),
@@ -835,9 +856,6 @@ const formatUnavailableRules = (rules) => {
 
 const validateRulesForSave = (rules, context) => {
   for (const rule of rules) {
-    if (!context.outboundByTag.has(rule.sourceTag)) {
-      throw `节点不存在：${rule.sourceTag}`
-    }
     if (rule.relayTag && rule.sourceTag === rule.relayTag) {
       throw `节点「${rule.sourceTag}」不能选择自身作为中转`
     }

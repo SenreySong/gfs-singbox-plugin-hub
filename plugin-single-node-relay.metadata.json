@@ -1,9 +1,9 @@
 {
   "id": "plugin-single-node-relay",
   "name": "指定节点中转",
-  "version": "v1.0.6",
+  "version": "v1.0.7",
   "group": "Extensions",
-  "description": "为指定 sing-box 出站节点配置中转节点，默认仅展示已配置中转；节点临时缺失时不再写回清空配置。 作者：SenreySong",
+  "description": "为指定 sing-box 出站节点配置中转节点，支持展示和清理源节点或中转节点不存在的失效配置。 作者：SenreySong",
   "tags": [
     "实用工具",
     "功能扩展",
