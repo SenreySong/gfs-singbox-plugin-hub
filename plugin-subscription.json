@@ -2,9 +2,9 @@
   {
     "id": "plugin-single-node-relay",
     "name": "指定节点中转",
-    "version": "v1.0.4",
+    "version": "v1.0.5",
     "group": "Extensions",
-    "description": "为指定 sing-box 出站节点配置中转节点，启动前写入 detour，订阅或配置更新不会覆盖插件保存的中转关系。 作者：SenreySong",
+    "description": "为指定 sing-box 出站节点配置中转节点，默认仅展示已配置中转并支持从未配置节点新增。 作者：SenreySong",
     "tags": [
       "实用工具",
       "功能扩展",

@@ -245,7 +245,7 @@ const selectProfile = async () => {
 }
 
 const openManager = async (profile) => {
-  const { ref, computed, h, watch } = Vue
+  const { ref, computed, h } = Vue
   const allRules = await loadRules()
   const generatedConfig = await Plugins.generateConfig(profile, { enablePluginProcessing: false })
   const context = buildConfigContext(generatedConfig)
@@ -272,10 +272,15 @@ const openManager = async (profile) => {
     })
   })
 
+  const configuredSourceTags = computed(() => new Set(rules.value.map((rule) => rule.sourceTag)))
+  const availableSourceOptions = computed(() => {
+    return nodeOptions.value.filter((option) => !configuredSourceTags.value.has(option.value))
+  })
+
   const component = {
     template: `
     <div class="flex flex-col gap-8 pr-8">
-      <div class="grid items-center gap-8" style="grid-template-columns: minmax(0, 1fr) 220px auto;">
+      <div class="grid items-center gap-8" style="grid-template-columns: minmax(0, 1fr) 220px auto auto;">
         <div class="flex items-center gap-8 min-w-0">
           <div class="font-bold text-16 truncate" :title="profileName + ' 节点中转'">{{ profileName }} 节点中转</div>
           <div class="text-12 shrink-0" style="padding: 2px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #334155;">
@@ -283,41 +288,46 @@ const openManager = async (profile) => {
           </div>
         </div>
         <Input v-model="keyword" placeholder="搜索节点" allow-paste />
+        <Button @click="openAddRulePicker" :disabled="availableSourceCount === 0">新增中转</Button>
         <Button type="primary" @click="save">保存配置</Button>
       </div>
 
       <Card>
-        <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); max-height: 520px; overflow: auto;">
+        <div class="flex flex-col gap-6" style="max-height: 520px; overflow: auto;">
           <div
             v-for="rule in filteredRules"
             :key="rule.id"
-            class="flex flex-col gap-8 rounded-4 p-8"
-            :style="getRuleCardStyle(rule)"
+            class="rounded-4 p-8"
+            :style="getRuleRowStyle(rule)"
           >
-            <div class="flex items-start justify-between gap-8">
-              <div class="min-w-0">
-                <div class="flex items-center gap-4">
-                  <span class="text-12" style="color: #64748b;">{{ getRegionLabel(rule.sourceTag) }}</span>
-                  <span class="text-12" style="color: #94a3b8;">{{ getOutboundType(rule.sourceTag) }}</span>
-                </div>
-                <div class="font-bold text-13 leading-5" style="word-break: break-word;" :title="rule.sourceTag">{{ rule.sourceTag }}</div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-4">
+                <span class="text-12" style="color: #64748b;">节点</span>
+                <span class="text-12" style="color: #64748b;">{{ getRegionLabel(rule.sourceTag) }}</span>
+                <span class="text-12" style="color: #94a3b8;">{{ getOutboundType(rule.sourceTag) }}</span>
               </div>
-              <Switch v-model="rule.enabled">启用</Switch>
+              <div class="font-bold text-13 truncate" :title="rule.sourceTag">{{ rule.sourceTag }}</div>
             </div>
 
-            <div class="rounded-4 p-6" style="background: #ffffff; border: 1px solid #e2e8f0;">
+            <button type="button" :style="relayButtonStyle" :title="renderRelayLabel(rule)" @click="openRelayPicker(rule)">
               <div class="text-12" style="color: #64748b;">中转节点</div>
-              <button type="button" :style="relayButtonStyle" :title="renderRelayLabel(rule)" @click="openRelayPicker(rule)">
-                {{ renderRelayLabel(rule) }}
-              </button>
-            </div>
+              <div class="font-bold text-13 truncate">{{ renderRelayLabel(rule) }}</div>
+            </button>
 
-            <div class="min-h-[18px] text-12 truncate" :style="getRuleStatusStyle(rule)" :title="getRuleStatus(rule)">
+            <div class="text-12 truncate" :style="getRuleStatusStyle(rule)" :title="getRuleStatus(rule)">
               {{ getRuleStatus(rule) }}
             </div>
+
+            <Switch v-model="rule.enabled">启用</Switch>
+
+            <div class="flex justify-end">
+              <Button type="text" @click="removeRule(rule)">删除</Button>
+            </div>
           </div>
-          <div v-if="filteredRules.length === 0" class="flex items-center justify-center min-h-[120px] border border-dashed rounded-4" style="grid-column: 1 / -1;">
-            <div class="text-12 text-gray-500">没有匹配节点</div>
+          <div v-if="filteredRules.length === 0" class="flex items-center justify-center min-h-[120px] border border-dashed rounded-4">
+            <div class="text-12 text-gray-500">
+              {{ rules.length === 0 ? '当前没有已配置中转的节点，点击新增中转添加' : '没有匹配节点' }}
+            </div>
           </div>
         </div>
       </Card>
@@ -332,27 +342,14 @@ const openManager = async (profile) => {
     `,
     setup() {
       const relayButtonStyle =
-        'width: 100%; min-height: 32px; margin-top: 4px; padding: 0 8px; border: 1px solid #94a3b8; border-radius: 4px; background: #ffffff; color: #0f172a; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;'
+        'width: 100%; min-height: 44px; padding: 4px 8px; border: 1px solid #94a3b8; border-radius: 4px; background: #ffffff; color: #0f172a; cursor: pointer; text-align: left; overflow: hidden;'
+      const ruleRowBaseStyle =
+        'display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(120px, 0.8fr) 74px 58px; align-items: center; gap: 8px;'
       const optionButtonStyle =
         'width: 100%; min-height: 96px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff; color: #0f172a; cursor: pointer; text-align: left; overflow: hidden;'
       const clearOptionButtonStyle =
         'width: 100%; min-height: 54px; padding: 10px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; color: #92400e; cursor: pointer; text-align: left; overflow: hidden;'
       const draftLinks = computed(() => buildValidatedLinks(rules.value, context, { throwOnCycle: false }))
-      watch(
-        rules,
-        (items) => {
-          items.forEach((rule) => {
-            if (!context.outboundByTag.has(rule.sourceTag)) {
-              rule.enabled = false
-              rule.relayTag = ''
-            }
-            if (rule.relayTag && !context.outboundByTag.has(rule.relayTag)) {
-              rule.relayTag = ''
-            }
-          })
-        },
-        { deep: true }
-      )
 
       const getOutboundType = (tag) => {
         return context.outboundByTag.get(tag)?.type || '不存在'
@@ -386,19 +383,208 @@ const openManager = async (profile) => {
         return 'color: #166534;'
       }
 
-      const getRuleCardStyle = (rule) => {
-        if (!rule.enabled) return 'border: 1px solid #cbd5e1; background: #f8fafc; opacity: 0.72;'
+      const getRuleRowStyle = (rule) => {
+        if (!rule.enabled) return `${ruleRowBaseStyle} border: 1px solid #cbd5e1; background: #f8fafc; opacity: 0.72;`
         if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能')) {
-          return 'border: 1px solid #fca5a5; background: #fff7f7;'
+          return `${ruleRowBaseStyle} border: 1px solid #fca5a5; background: #fff7f7;`
         }
-        if (rule.relayTag) return 'border: 1px solid #86efac; background: #f7fff9;'
-        return 'border: 1px solid #cbd5e1; background: #f8fafc;'
+        return `${ruleRowBaseStyle} border: 1px solid #86efac; background: #f7fff9;`
       }
 
       const getOptionTitle = (option) => option.value
 
       const getOptionMeta = (option) => {
         return `${getRegionInfo(option.value).label} / ${option.type}`
+      }
+
+      const getPickerOptionStyle = (selected, disabled = false) => {
+        const base =
+          'width: 100%; min-height: 58px; padding: 8px; border-radius: 6px; color: #0f172a; text-align: left; overflow: hidden;'
+        if (disabled) return `${base} border: 1px solid #e2e8f0; background: #f8fafc; opacity: 0.45; cursor: not-allowed;`
+        if (selected) return `${base} border: 1px solid #2563eb; background: #eff6ff; cursor: pointer;`
+        return `${base} border: 1px solid #cbd5e1; background: #ffffff; cursor: pointer;`
+      }
+
+      const sortRows = () => {
+        rules.value = rules.value.slice().sort((left, right) => compareTagByRegion(left.sourceTag, right.sourceTag))
+      }
+
+      const removeRule = (rule) => {
+        const index = rules.value.findIndex((item) => item.id === rule.id)
+        if (index >= 0) rules.value.splice(index, 1)
+      }
+
+      const validateDraftRelay = (sourceTag, relayTag, currentRuleId = '') => {
+        if (!sourceTag) {
+          Plugins.message.warn('请先选择节点')
+          return false
+        }
+        if (!relayTag) {
+          Plugins.message.warn('请先选择中转节点')
+          return false
+        }
+        if (sourceTag === relayTag) {
+          Plugins.message.warn('不能选择自身作为中转')
+          return false
+        }
+        const nextRules = rules.value.map((rule) => {
+          if (rule.id !== currentRuleId) return rule
+          return {
+            ...rule,
+            relayTag
+          }
+        })
+        if (!currentRuleId) {
+          nextRules.push({
+            id: Plugins.sampleID(),
+            profileId: profile.id,
+            sourceTag,
+            relayTag,
+            enabled: true
+          })
+        }
+        const result = buildValidatedLinks(nextRules, context, { throwOnCycle: false })
+        if (result.invalidCycles.has(sourceTag)) {
+          Plugins.message.warn('该中转关系会形成循环，已阻止')
+          return false
+        }
+        return true
+      }
+
+      const openAddRulePicker = () => {
+        const sourceKeyword = ref('')
+        const relayKeyword = ref('')
+        const selectedSourceTag = ref('')
+        const selectedRelayTag = ref('')
+        const filterOptions = (options, keyword) => {
+          const text = keyword.trim().toLowerCase()
+          if (!text) return options
+          return options.filter((option) => {
+            const content = `${option.label} ${option.value} ${option.type} ${getRegionInfo(option.value).label}`.toLowerCase()
+            return content.includes(text)
+          })
+        }
+        const sourceOptions = computed(() => filterOptions(availableSourceOptions.value, sourceKeyword.value))
+        const relayOptions = computed(() => {
+          return filterOptions(nodeOptions.value, relayKeyword.value).filter((option) => option.value !== selectedSourceTag.value)
+        })
+
+        const addComponent = {
+          template: `
+          <div class="flex flex-col gap-8 p-8">
+            <div class="grid gap-10" style="grid-template-columns: 1fr 1fr;">
+              <div class="flex flex-col gap-6 min-w-0">
+                <div class="font-bold text-13">选择未配置节点</div>
+                <Input v-model="sourceKeyword" placeholder="搜索节点、类型或地区" allow-paste />
+                <div class="flex flex-col gap-6" style="max-height: 360px; overflow: auto;">
+                  <button
+                    v-for="option in sourceOptions"
+                    :key="option.value"
+                    type="button"
+                    :style="getPickerOptionStyle(option.value === selectedSourceTag)"
+                    :title="option.label"
+                    @click="selectSource(option.value)"
+                  >
+                    <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                    <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
+                  </button>
+                  <div v-if="sourceOptions.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
+                    <div class="text-12 text-gray-500">没有可添加节点</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-6 min-w-0">
+                <div class="font-bold text-13">选择中转节点</div>
+                <Input v-model="relayKeyword" placeholder="搜索中转节点、类型或地区" allow-paste />
+                <div class="flex flex-col gap-6" style="max-height: 360px; overflow: auto;">
+                  <button
+                    v-for="option in relayOptions"
+                    :key="option.value"
+                    type="button"
+                    :style="getPickerOptionStyle(option.value === selectedRelayTag, !selectedSourceTag)"
+                    :title="option.label"
+                    :disabled="!selectedSourceTag"
+                    @click="selectRelay(option.value)"
+                  >
+                    <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                    <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
+                  </button>
+                  <div v-if="relayOptions.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
+                    <div class="text-12 text-gray-500">{{ selectedSourceTag ? '没有匹配中转节点' : '请先选择左侧节点' }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-8">
+              <div class="text-12 truncate" style="color: #64748b;" :title="selectedSummary">
+                {{ selectedSummary }}
+              </div>
+              <Button type="primary" @click="addSelectedRule" :disabled="!selectedSourceTag || !selectedRelayTag">添加中转</Button>
+            </div>
+          </div>
+          `,
+          setup() {
+            const selectSource = (sourceTag) => {
+              selectedSourceTag.value = sourceTag
+              if (selectedRelayTag.value === sourceTag) selectedRelayTag.value = ''
+            }
+            const selectRelay = (relayTag) => {
+              if (!selectedSourceTag.value) return
+              selectedRelayTag.value = relayTag
+            }
+            const addSelectedRule = () => {
+              if (!validateDraftRelay(selectedSourceTag.value, selectedRelayTag.value)) return
+              rules.value.push({
+                id: Plugins.sampleID(),
+                profileId: profile.id,
+                sourceTag: selectedSourceTag.value,
+                relayTag: selectedRelayTag.value,
+                enabled: true
+              })
+              sortRows()
+              addModal.close()
+            }
+
+            return {
+              sourceKeyword,
+              relayKeyword,
+              sourceOptions,
+              relayOptions,
+              selectedSourceTag,
+              selectedRelayTag,
+              selectedSummary: computed(() => {
+                if (!selectedSourceTag.value) return '请选择左侧节点'
+                if (!selectedRelayTag.value) return `已选择节点：${selectedSourceTag.value}，请选择右侧中转节点`
+                return `${selectedSourceTag.value} -> ${selectedRelayTag.value}`
+              }),
+              getPickerOptionStyle,
+              getOptionTitle,
+              getOptionMeta,
+              selectSource,
+              selectRelay,
+              addSelectedRule
+            }
+          }
+        }
+
+        const addModal = Plugins.modal(
+          {
+            title: '新增节点中转',
+            width: '760px',
+            height: '560px',
+            footer: false,
+            maskClosable: true,
+            afterClose() {
+              addModal.destroy()
+            }
+          },
+          {
+            default: () => h(addComponent)
+          }
+        )
+        addModal.open()
       }
 
       const openRelayPicker = (rule) => {
@@ -443,6 +629,12 @@ const openManager = async (profile) => {
           `,
           setup() {
             const chooseRelay = (relayTag) => {
+              if (!relayTag) {
+                removeRule(rule)
+                pickerModal.close()
+                return
+              }
+              if (!validateDraftRelay(rule.sourceTag, relayTag, rule.id)) return
               rule.relayTag = relayTag
               pickerModal.close()
             }
@@ -482,9 +674,7 @@ const openManager = async (profile) => {
         if (!(await Plugins.confirm('清空中转配置', `确定清空「${profile.name}」的所有节点中转吗？`).catch(() => false))) {
           return
         }
-        rules.value.forEach((rule) => {
-          rule.relayTag = ''
-        })
+        rules.value = []
       }
 
       const save = async () => {
@@ -508,6 +698,7 @@ const openManager = async (profile) => {
         keyword,
         rules,
         filteredRules,
+        availableSourceCount: computed(() => availableSourceOptions.value.length),
         relayButtonStyle,
         getOutboundType,
         getRegionLabel,
@@ -515,7 +706,9 @@ const openManager = async (profile) => {
         getRuleWarning,
         getRuleStatus,
         getRuleStatusStyle,
-        getRuleCardStyle,
+        getRuleRowStyle,
+        removeRule,
+        openAddRulePicker,
         openRelayPicker,
         clearRelays,
         save
@@ -542,19 +735,19 @@ const openManager = async (profile) => {
 }
 
 const ensureRows = (storedRules, context, profileId) => {
-  const ruleBySource = new Map(storedRules.map((rule) => [rule.sourceTag, rule]))
-  return Array.from(context.outboundByTag.keys())
-    .sort(compareTagByRegion)
-    .map((sourceTag) => {
-      const saved = ruleBySource.get(sourceTag)
-      return {
-        id: saved?.id || Plugins.sampleID(),
-        profileId,
-        sourceTag,
-        relayTag: saved?.relayTag && context.outboundByTag.has(saved.relayTag) ? saved.relayTag : '',
-        enabled: saved?.enabled !== false
-      }
-    })
+  return normalizeRules(storedRules)
+    .filter((rule) => rule.profileId === profileId)
+    .filter((rule) => rule.relayTag)
+    .filter((rule) => context.outboundByTag.has(rule.sourceTag))
+    .filter((rule) => context.outboundByTag.has(rule.relayTag))
+    .sort((left, right) => compareTagByRegion(left.sourceTag, right.sourceTag))
+    .map((rule) => ({
+      id: rule.id || Plugins.sampleID(),
+      profileId,
+      sourceTag: rule.sourceTag,
+      relayTag: rule.relayTag,
+      enabled: rule.enabled !== false
+    }))
 }
 
 const compareOutboundByRegion = (a, b) => compareTagByRegion(a.tag, b.tag)
