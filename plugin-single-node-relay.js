@@ -222,15 +222,12 @@ const onBeforeCoreStart = async (config, profile) => {
   if (profileRules.length === 0) return config
 
   const context = buildConfigContext(config)
-  const nextRules = reconcileMissingRelays(profileRules, context)
-  if (JSON.stringify(nextRules) !== JSON.stringify(profileRules)) {
-    const allRules = rules.filter((rule) => rule.profileId !== profile.id).concat(nextRules)
-    getState().rules.value = normalizeRules(allRules)
-    await saveRules(getState().rules.value)
-    Plugins.message.warn('部分中转节点已不存在，已自动清空对应中转配置')
+  const unavailableRules = collectUnavailableRules(profileRules, context)
+  if (unavailableRules.length > 0) {
+    Plugins.message.warn(`节点中转已跳过当前配置不存在的节点：${formatUnavailableRules(unavailableRules)}`)
   }
 
-  const links = buildValidatedLinks(nextRules, context)
+  const links = buildValidatedLinks(profileRules, context)
   applyDetours(config, links)
   return config
 }
@@ -365,6 +362,8 @@ const openManager = async (profile) => {
       const getRuleWarning = (rule) => {
         if (!rule.enabled) return ''
         if (!rule.relayTag) return ''
+        if (!context.outboundByTag.has(rule.sourceTag)) return '节点不存在'
+        if (!context.outboundByTag.has(rule.relayTag)) return `中转节点不存在：${rule.relayTag}`
         if (rule.sourceTag === rule.relayTag) return '不能选择自身作为中转'
         if (draftLinks.value.invalidCycles.has(rule.sourceTag)) return '当前链路存在循环'
         return renderChain(rule.sourceTag, draftLinks.value.links)
@@ -379,13 +378,15 @@ const openManager = async (profile) => {
       const getRuleStatusStyle = (rule) => {
         if (!rule.enabled) return 'color: #64748b;'
         if (!rule.relayTag) return 'color: #64748b;'
-        if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能')) return 'color: #dc2626;'
+        if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能') || getRuleWarning(rule).includes('不存在')) {
+          return 'color: #dc2626;'
+        }
         return 'color: #166534;'
       }
 
       const getRuleRowStyle = (rule) => {
         if (!rule.enabled) return `${ruleRowBaseStyle} border: 1px solid #cbd5e1; background: #f8fafc; opacity: 0.72;`
-        if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能')) {
+        if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能') || getRuleWarning(rule).includes('不存在')) {
           return `${ruleRowBaseStyle} border: 1px solid #fca5a5; background: #fff7f7;`
         }
         return `${ruleRowBaseStyle} border: 1px solid #86efac; background: #f7fff9;`
@@ -739,7 +740,6 @@ const ensureRows = (storedRules, context, profileId) => {
     .filter((rule) => rule.profileId === profileId)
     .filter((rule) => rule.relayTag)
     .filter((rule) => context.outboundByTag.has(rule.sourceTag))
-    .filter((rule) => context.outboundByTag.has(rule.relayTag))
     .sort((left, right) => compareTagByRegion(left.sourceTag, right.sourceTag))
     .map((rule) => ({
       id: rule.id || Plugins.sampleID(),
@@ -820,27 +820,23 @@ const isChainableOutbound = (outbound) => {
   return true
 }
 
-const reconcileMissingRelays = (rules, context) => {
-  return normalizeRules(rules).map((rule) => {
-    if (!rule.relayTag) return rule
-    if (!context.outboundByTag.has(rule.sourceTag)) return rule
-    if (!context.outboundByTag.has(rule.relayTag)) {
-      return {
-        ...rule,
-        relayTag: ''
-      }
-    }
-    return rule
-  })
+const collectUnavailableRules = (rules, context) => {
+  return normalizeRules(rules)
+    .filter((rule) => rule.enabled !== false)
+    .filter((rule) => rule.relayTag)
+    .filter((rule) => !context.outboundByTag.has(rule.sourceTag) || !context.outboundByTag.has(rule.relayTag))
+}
+
+const formatUnavailableRules = (rules) => {
+  const items = rules.slice(0, 6).map((rule) => `${rule.sourceTag} -> ${rule.relayTag}`)
+  const suffix = rules.length > items.length ? ` 等 ${rules.length} 条` : ''
+  return `${items.join('、')}${suffix}`
 }
 
 const validateRulesForSave = (rules, context) => {
   for (const rule of rules) {
     if (!context.outboundByTag.has(rule.sourceTag)) {
       throw `节点不存在：${rule.sourceTag}`
-    }
-    if (rule.relayTag && !context.outboundByTag.has(rule.relayTag)) {
-      throw `中转节点不存在：${rule.relayTag}`
     }
     if (rule.relayTag && rule.sourceTag === rule.relayTag) {
       throw `节点「${rule.sourceTag}」不能选择自身作为中转`
