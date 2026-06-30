@@ -1,7 +1,21 @@
 const DATA_DIR = 'data/third/single-node-relay'
 const CONFIG_FILE = DATA_DIR + '/rules.json'
-const GROUP_OUTBOUND_TYPES = new Set(['selector', 'urltest'])
-const EXCLUDED_OUTBOUND_TYPES = new Set(['direct', 'block', 'dns'])
+const CHAINABLE_OUTBOUND_TYPES = new Set([
+  'shadowsocks',
+  'vmess',
+  'vless',
+  'trojan',
+  'hysteria',
+  'hysteria2',
+  'tuic',
+  'anytls',
+  'wireguard',
+  'ssh',
+  'http',
+  'socks',
+  'shadowtls',
+  'naive'
+])
 const REGION_ORDER = [
   'CN',
   'HK',
@@ -463,7 +477,7 @@ const openManager = async (profile) => {
       const openAddRulePicker = () => {
         const sourceKeyword = ref('')
         const relayKeyword = ref('')
-        const selectedSourceTag = ref('')
+        const selectedSourceTags = ref([])
         const selectedRelayTag = ref('')
         const filterOptions = (options, keyword) => {
           const text = keyword.trim().toLowerCase()
@@ -474,8 +488,10 @@ const openManager = async (profile) => {
           })
         }
         const sourceOptions = computed(() => filterOptions(availableSourceOptions.value, sourceKeyword.value))
+        const isRelayPickerDisabled = computed(() => selectedSourceTags.value.length !== 1)
         const relayOptions = computed(() => {
-          return filterOptions(nodeOptions.value, relayKeyword.value).filter((option) => option.value !== selectedSourceTag.value)
+          const selectedSourceTag = selectedSourceTags.value[0] || ''
+          return filterOptions(nodeOptions.value, relayKeyword.value).filter((option) => option.value !== selectedSourceTag)
         })
 
         const addComponent = {
@@ -490,11 +506,14 @@ const openManager = async (profile) => {
                     v-for="option in sourceOptions"
                     :key="option.value"
                     type="button"
-                    :style="getPickerOptionStyle(option.value === selectedSourceTag)"
+                    :style="getPickerOptionStyle(isSourceSelected(option.value))"
                     :title="option.label"
-                    @click="selectSource(option.value)"
+                    @click="toggleSource(option.value)"
                   >
-                    <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                    <div class="flex items-center justify-between gap-6">
+                      <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                      <input type="checkbox" :checked="isSourceSelected(option.value)" @click.stop="toggleSource(option.value)" />
+                    </div>
                     <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
                   </button>
                   <div v-if="sourceOptions.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
@@ -511,16 +530,16 @@ const openManager = async (profile) => {
                     v-for="option in relayOptions"
                     :key="option.value"
                     type="button"
-                    :style="getPickerOptionStyle(option.value === selectedRelayTag, !selectedSourceTag)"
+                    :style="getPickerOptionStyle(option.value === selectedRelayTag, isRelayPickerDisabled)"
                     :title="option.label"
-                    :disabled="!selectedSourceTag"
+                    :disabled="isRelayPickerDisabled"
                     @click="selectRelay(option.value)"
                   >
                     <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
                     <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
                   </button>
                   <div v-if="relayOptions.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
-                    <div class="text-12 text-gray-500">{{ selectedSourceTag ? '没有匹配中转节点' : '请先选择左侧节点' }}</div>
+                    <div class="text-12 text-gray-500">{{ relayEmptyText }}</div>
                   </div>
                 </div>
               </div>
@@ -530,28 +549,41 @@ const openManager = async (profile) => {
               <div class="text-12 truncate" style="color: #64748b;" :title="selectedSummary">
                 {{ selectedSummary }}
               </div>
-              <Button type="primary" @click="addSelectedRule" :disabled="!selectedSourceTag || !selectedRelayTag">添加中转</Button>
+              <Button type="primary" @click="addSelectedRule" :disabled="selectedSourceTags.length === 0 || (selectedSourceTags.length === 1 && !selectedRelayTag)">添加中转</Button>
             </div>
           </div>
           `,
           setup() {
-            const selectSource = (sourceTag) => {
-              selectedSourceTag.value = sourceTag
-              if (selectedRelayTag.value === sourceTag) selectedRelayTag.value = ''
+            const isSourceSelected = (sourceTag) => selectedSourceTags.value.includes(sourceTag)
+            const toggleSource = (sourceTag) => {
+              if (isSourceSelected(sourceTag)) {
+                selectedSourceTags.value = selectedSourceTags.value.filter((tag) => tag !== sourceTag)
+              } else {
+                selectedSourceTags.value = selectedSourceTags.value.concat(sourceTag)
+              }
+              if (selectedSourceTags.value.length !== 1 || selectedRelayTag.value === selectedSourceTags.value[0]) {
+                selectedRelayTag.value = ''
+              }
             }
             const selectRelay = (relayTag) => {
-              if (!selectedSourceTag.value) return
+              if (isRelayPickerDisabled.value) return
               selectedRelayTag.value = relayTag
             }
             const addSelectedRule = () => {
-              if (!validateDraftRelay(selectedSourceTag.value, selectedRelayTag.value)) return
-              rules.value.push({
-                id: Plugins.sampleID(),
-                profileId: profile.id,
-                sourceTag: selectedSourceTag.value,
-                relayTag: selectedRelayTag.value,
-                enabled: true
-              })
+              if (selectedSourceTags.value.length === 0) {
+                Plugins.message.warn('请至少选择一个节点')
+                return
+              }
+              if (selectedSourceTags.value.length === 1 && !validateDraftRelay(selectedSourceTags.value[0], selectedRelayTag.value)) return
+              for (const sourceTag of selectedSourceTags.value) {
+                rules.value.push({
+                  id: Plugins.sampleID(),
+                  profileId: profile.id,
+                  sourceTag,
+                  relayTag: selectedSourceTags.value.length === 1 ? selectedRelayTag.value : '',
+                  enabled: true
+                })
+              }
               sortRows()
               addModal.close()
             }
@@ -561,17 +593,25 @@ const openManager = async (profile) => {
               relayKeyword,
               sourceOptions,
               relayOptions,
-              selectedSourceTag,
+              selectedSourceTags,
               selectedRelayTag,
+              isRelayPickerDisabled,
+              relayEmptyText: computed(() => {
+                if (selectedSourceTags.value.length === 0) return '请先选择左侧节点'
+                if (selectedSourceTags.value.length > 1) return '左侧选择多条时，请添加后在外层逐条配置中转节点'
+                return '没有匹配中转节点'
+              }),
               selectedSummary: computed(() => {
-                if (!selectedSourceTag.value) return '请选择左侧节点'
-                if (!selectedRelayTag.value) return `已选择节点：${selectedSourceTag.value}，请选择右侧中转节点`
-                return `${selectedSourceTag.value} -> ${selectedRelayTag.value}`
+                if (selectedSourceTags.value.length === 0) return '请选择左侧节点'
+                if (selectedSourceTags.value.length > 1) return `已选择 ${selectedSourceTags.value.length} 个节点，添加后在外层逐条配置中转节点`
+                if (!selectedRelayTag.value) return `已选择节点：${selectedSourceTags.value[0]}，请选择右侧中转节点`
+                return `${selectedSourceTags.value[0]} -> ${selectedRelayTag.value}`
               }),
               getPickerOptionStyle,
               getOptionTitle,
               getOptionMeta,
-              selectSource,
+              isSourceSelected,
+              toggleSource,
               selectRelay,
               addSelectedRule
             }
@@ -836,9 +876,7 @@ const buildConfigContext = (config) => {
 
 const isChainableOutbound = (outbound) => {
   if (!outbound?.tag) return false
-  if (GROUP_OUTBOUND_TYPES.has(outbound.type)) return false
-  if (EXCLUDED_OUTBOUND_TYPES.has(outbound.type)) return false
-  return true
+  return CHAINABLE_OUTBOUND_TYPES.has(String(outbound.type || '').toLowerCase())
 }
 
 const collectUnavailableRules = (rules, context) => {
@@ -856,6 +894,9 @@ const formatUnavailableRules = (rules) => {
 
 const validateRulesForSave = (rules, context) => {
   for (const rule of rules) {
+    if (!rule.relayTag) {
+      throw `节点「${rule.sourceTag}」尚未选择中转节点`
+    }
     if (rule.relayTag && rule.sourceTag === rule.relayTag) {
       throw `节点「${rule.sourceTag}」不能选择自身作为中转`
     }
