@@ -220,6 +220,8 @@ const normalizeRules = (rules) => {
     })
 }
 
+const getRuleKey = (rule) => `${rule.profileId}\n${rule.sourceTag}`
+
 const onReady = async () => {
   await loadRules()
 }
@@ -262,6 +264,7 @@ const openManager = async (profile) => {
   const context = buildConfigContext(generatedConfig)
   const profileRules = normalizeRules(allRules.filter((rule) => rule.profileId === profile.id))
   const rules = ref(ensureRows(profileRules, context, profile.id))
+  const persistedProfileRules = ref(profileRules)
   const keyword = ref('')
 
   const nodeOptions = computed(() => {
@@ -727,15 +730,21 @@ const openManager = async (profile) => {
       }
 
       const clearUnavailableRules = async () => {
-        const count = rules.value.filter(isUnavailableRule).length
+        const unavailableRules = collectUnavailableRules(persistedProfileRules.value, context)
+        const count = unavailableRules.length
         if (count === 0) return
         const confirmed = await Plugins.confirm(
           '清理失效配置',
           `确定删除当前配置中 ${count} 条源节点或中转节点不存在的中转规则吗？`
         ).catch(() => false)
         if (!confirmed) return
-        rules.value = rules.value.filter((rule) => !isUnavailableRule(rule))
-        await save()
+        const unavailableKeys = new Set(unavailableRules.map(getRuleKey))
+        rules.value = rules.value.filter((rule) => !unavailableKeys.has(getRuleKey(rule)))
+        getState().rules.value = normalizeRules(getState().rules.value.filter((rule) => !unavailableKeys.has(getRuleKey(rule))))
+        persistedProfileRules.value = normalizeRules(getState().rules.value.filter((rule) => rule.profileId === profile.id))
+        await saveRules(getState().rules.value)
+        await restartCoreIfCurrentProfile(profile)
+        modal.close()
       }
 
       const save = async () => {
@@ -748,6 +757,7 @@ const openManager = async (profile) => {
         )
         const savedRules = otherRules.concat(hiddenProfileRules, normalized.filter((rule) => rule.relayTag))
         getState().rules.value = normalizeRules(savedRules)
+        persistedProfileRules.value = normalizeRules(getState().rules.value.filter((rule) => rule.profileId === profile.id))
         await saveRules(getState().rules.value)
         await restartCoreIfCurrentProfile(profile)
         modal.close()
@@ -760,7 +770,7 @@ const openManager = async (profile) => {
         rules,
         filteredRules,
         availableSourceCount: computed(() => availableSourceOptions.value.length),
-        unavailableRuleCount: computed(() => rules.value.filter(isUnavailableRule).length),
+        unavailableRuleCount: computed(() => collectUnavailableRules(persistedProfileRules.value, context).length),
         relayButtonStyle,
         getOutboundType,
         getRegionLabel,
