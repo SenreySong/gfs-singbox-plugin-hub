@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS = {
     legacyDnsOutbound: true,
     dnsRuleCompatibility: true,
     remoteRuleSetHttpClient: true,
+    remoteRuleSetDefaultHttpClient: true,
+    bridgePreferredBy: true,
     inlineAcme: true,
     removedTailscaleHttpClient: true,
     hysteriaDeprecatedFields: false,
@@ -30,10 +32,13 @@ const DEFAULT_SETTINGS = {
     routeDefaultDomainResolver: true,
     dnsOptimistic: false,
     dnsTimeout: false,
-    tunDnsMode: true
+    tunDnsMode: true,
+    icmpBridge: true
   },
   featureOptions: {
-    tunDnsAddress: ''
+    tunDnsAddress: '',
+    icmpBridgeTag: 'icmp-bridge',
+    icmpBridgeInterface: ''
   }
 }
 const CONVERSION_DEFINITIONS = [
@@ -110,6 +115,18 @@ const CONVERSION_DEFINITIONS = [
     description: '把 rule_set.download_detour 迁移为 1.14 的 http_client。'
   },
   {
+    id: 'remote-ruleset-default-http-client',
+    level: 'recommend',
+    title: '远程规则集默认 HTTP 客户端',
+    description: '为远程规则集显式配置 http_clients 与 route.default_http_client，消除 1.14 隐式默认客户端警告。'
+  },
+  {
+    id: 'bridge-preferred-by',
+    level: 'recommend',
+    title: 'Bridge preferred_by 修正',
+    description: '把 bridge 类型名误用修正为实际 bridge 出站 tag，并为 bridge 规则补 preferred_by。'
+  },
+  {
     id: 'inline-acme',
     level: 'recommend',
     title: '内联 ACME 迁移',
@@ -154,6 +171,11 @@ const FEATURE_DEFINITIONS = [
     id: 'tun-dns-mode',
     title: '注入 TUN DNS 模式',
     description: '有 TUN 入站时注入 dns_mode=hijack，并补充显式 hijack-dns 路由规则。'
+  },
+  {
+    id: 'icmp-bridge',
+    title: '注入 ICMP Bridge 出站',
+    description: '有 TUN 入站时注入 bridge 出站和最前置 ICMP 规则，让 ping 流量直接三层转发。'
   }
 ]
 
@@ -250,7 +272,9 @@ const normalizeSettings = (settings) => ({
   featureOptions: {
     ...DEFAULT_SETTINGS.featureOptions,
     ...(settings?.featureOptions || {}),
-    tunDnsAddress: String(settings?.featureOptions?.tunDnsAddress || '').trim()
+    tunDnsAddress: String(settings?.featureOptions?.tunDnsAddress || '').trim(),
+    icmpBridgeTag: String(settings?.featureOptions?.icmpBridgeTag || DEFAULT_SETTINGS.featureOptions.icmpBridgeTag).trim() || DEFAULT_SETTINGS.featureOptions.icmpBridgeTag,
+    icmpBridgeInterface: String(settings?.featureOptions?.icmpBridgeInterface || '').trim()
   }
 })
 
@@ -384,6 +408,16 @@ const applyMigrations = (config, settings, options = {}) => {
     migrateRemoteRuleSetHttpClient(workingConfig, report)
   } else {
     recordSkipped(report, 'remote-ruleset-http-client')
+  }
+  if (settings.recommendationToggles.remoteRuleSetDefaultHttpClient) {
+    migrateRemoteRuleSetDefaultHttpClient(workingConfig, report)
+  } else {
+    recordSkipped(report, 'remote-ruleset-default-http-client')
+  }
+  if (settings.recommendationToggles.bridgePreferredBy) {
+    migrateBridgePreferredBy(workingConfig, report)
+  } else {
+    recordSkipped(report, 'bridge-preferred-by')
   }
   if (settings.recommendationToggles.inlineAcme) {
     migrateInlineAcme(workingConfig, report)
@@ -837,6 +871,84 @@ const migrateRemoteRuleSetHttpClient = (config, report) => {
   recordRecommend(report, 'remote-ruleset-http-client', count)
 }
 
+const migrateRemoteRuleSetDefaultHttpClient = (config, report) => {
+  const remoteRuleSets = (config?.route?.rule_set || []).filter((ruleSet) => {
+    return ruleSet && typeof ruleSet === 'object' && ruleSet.type === 'remote' && ruleSet.url
+  })
+  if (remoteRuleSets.length === 0) return
+  if (!remoteRuleSets.some((ruleSet) => ruleSet.http_client === undefined)) return
+  if (!config.route) config.route = {}
+  if (config.route.default_http_client) return
+
+  const existingTag = findFirstHttpClientTag(config)
+  const tag = existingTag || nextAvailableTag(config, 'rule-set-http-client')
+  let count = 0
+  if (!existingTag) {
+    config.http_clients = Array.isArray(config.http_clients) ? config.http_clients : []
+    const client = {
+      ...buildDefaultRuleSetHttpClient(config, remoteRuleSets),
+      tag
+    }
+    config.http_clients.push(client)
+    count += 1
+  }
+  config.route.default_http_client = tag
+  count += 1
+  const client = findHttpClientByTag(config, tag)
+  const note = client?.detour ? `使用 ${client.detour}` : `使用 ${tag}`
+  recordRecommend(report, 'remote-ruleset-default-http-client', count, note)
+}
+
+const buildDefaultRuleSetHttpClient = (config, remoteRuleSets) => {
+  for (const ruleSet of remoteRuleSets) {
+    if (ruleSet?.http_client && typeof ruleSet.http_client === 'object') {
+      return clone(ruleSet.http_client)
+    }
+  }
+  const finalOutbound = typeof config?.route?.final === 'string' ? config.route.final : ''
+  if (finalOutbound) return { detour: finalOutbound }
+  const directOutbound = (config?.outbounds || []).find((outbound) => outbound?.type === 'direct' && outbound.tag)
+  if (directOutbound?.tag) return { detour: directOutbound.tag }
+  return {}
+}
+
+const migrateBridgePreferredBy = (config, report) => {
+  const rules = config?.route?.rules || []
+  if (!Array.isArray(rules) || rules.length === 0) return
+  const bridgeTags = getBridgeOutboundTags(config)
+  if (bridgeTags.length === 0) return
+  let count = 0
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue
+    const outbound = typeof rule.outbound === 'string' ? rule.outbound : ''
+    const preferredBy = rule.preferred_by === undefined ? [] : toArray(rule.preferred_by).map(String)
+    let nextPreferredBy = preferredBy.slice()
+    let changed = false
+
+    if (nextPreferredBy.includes('bridge') && !hasOutboundTag(config, 'bridge')) {
+      const replacement = outbound && bridgeTags.includes(outbound)
+        ? outbound
+        : bridgeTags.length === 1 ? bridgeTags[0] : ''
+      if (replacement) {
+        nextPreferredBy = nextPreferredBy.map((value) => value === 'bridge' ? replacement : value)
+        changed = true
+      } else {
+        recordSkipped(report, 'bridge-preferred-by', 1, '存在多个 bridge 出站，无法判断 preferred_by 应指向哪个 tag。')
+      }
+    }
+
+    if (outbound && bridgeTags.includes(outbound) && !nextPreferredBy.includes(outbound)) {
+      nextPreferredBy.push(outbound)
+      changed = true
+    }
+
+    if (!changed) continue
+    rule.preferred_by = unique(nextPreferredBy)
+    count += 1
+  }
+  recordRecommend(report, 'bridge-preferred-by', count)
+}
+
 const migrateInlineAcme = (config, report) => {
   let count = 0
   for (const holder of collectObjects(config)) {
@@ -926,6 +1038,11 @@ const applyFeatureInjections = (config, report, settings) => {
     injectTunDnsMode(config, report, settings)
   } else {
     recordSkipped(report, 'tun-dns-mode')
+  }
+  if (settings.featureToggles.icmpBridge) {
+    injectIcmpBridge(config, report, settings)
+  } else {
+    recordSkipped(report, 'icmp-bridge')
   }
 }
 
@@ -1017,6 +1134,65 @@ const ensureDnsHijackRouteRule = (config) => {
   return 1
 }
 
+const injectIcmpBridge = (config, report, settings) => {
+  const tunInbounds = (config?.inbounds || []).filter((inbound) => inbound?.type === 'tun')
+  if (tunInbounds.length === 0) return
+  if (!isIcmpBridgeSupported(report?.kernel?.version)) {
+    recordSkipped(report, 'icmp-bridge', 1, `当前核心 ${report?.kernel?.version || '未知'} 可能不支持 bridge preferred_by。`)
+    return
+  }
+
+  config.outbounds = Array.isArray(config.outbounds) ? config.outbounds : []
+  const bridgeTag = settings.featureOptions?.icmpBridgeTag || DEFAULT_SETTINGS.featureOptions.icmpBridgeTag
+  const bridgeInterface = settings.featureOptions?.icmpBridgeInterface || ''
+  const existingOutbound = config.outbounds.find((outbound) => outbound?.tag === bridgeTag)
+  let count = 0
+  if (existingOutbound && existingOutbound.type !== 'bridge') {
+    recordSkipped(report, 'icmp-bridge', 1, `${bridgeTag} 已被 ${existingOutbound.type || '未知'} 出站占用。`)
+    return
+  }
+  if (existingOutbound) {
+    if (bridgeInterface && existingOutbound.interface !== bridgeInterface) {
+      existingOutbound.interface = bridgeInterface
+      count += 1
+    }
+  } else {
+    const bridgeOutbound = {
+      type: 'bridge',
+      tag: bridgeTag
+    }
+    if (bridgeInterface) bridgeOutbound.interface = bridgeInterface
+    config.outbounds.unshift(bridgeOutbound)
+    count += 1
+  }
+
+  if (!config.route) config.route = {}
+  const rules = Array.isArray(config.route.rules) ? config.route.rules : []
+  const nextRules = rules.filter((rule) => !isIcmpBridgeRule(rule, bridgeTag))
+  const firstRule = rules[0]
+  if (!isIcmpBridgeRule(firstRule, bridgeTag) || nextRules.length !== rules.length - 1) {
+    config.route.rules = [buildIcmpBridgeRule(bridgeTag)].concat(nextRules)
+    count += 1
+  } else if (!isPreferredByTag(firstRule.preferred_by, bridgeTag)) {
+    firstRule.preferred_by = [bridgeTag]
+    count += 1
+  }
+  recordInjected(report, 'icmp-bridge', count, bridgeInterface ? `网卡 ${bridgeInterface}` : `出站 ${bridgeTag}`)
+}
+
+const buildIcmpBridgeRule = (bridgeTag) => ({
+  network: 'icmp',
+  preferred_by: [bridgeTag],
+  action: 'route',
+  outbound: bridgeTag
+})
+
+const isIcmpBridgeRule = (rule, bridgeTag) => {
+  if (!rule || typeof rule !== 'object') return false
+  if (rule.outbound !== bridgeTag) return false
+  return toArray(rule.network).includes('icmp')
+}
+
 const openManager = async () => {
   const { ref, h } = Vue
   const settings = ref(normalizeSettings(await loadSettings()))
@@ -1091,6 +1267,10 @@ const openManager = async () => {
         <div class="grid items-center gap-8 mb-8" style="grid-template-columns: 150px minmax(220px, 1fr);">
           <div class="font-bold text-13">TUN DNS 地址</div>
           <Input v-model="settings.featureOptions.tunDnsAddress" placeholder="例如 172.18.0.2,fdfe:dcba:9876::2，可空" allow-paste />
+          <div class="font-bold text-13">ICMP Bridge Tag</div>
+          <Input v-model="settings.featureOptions.icmpBridgeTag" placeholder="默认 icmp-bridge" allow-paste />
+          <div class="font-bold text-13">ICMP Bridge 网卡</div>
+          <Input v-model="settings.featureOptions.icmpBridgeInterface" placeholder="可空；例如 en0，留空则由核心选择默认接口" allow-paste />
         </div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
           <div v-for="item in featureItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
@@ -1397,6 +1577,69 @@ const selectVersionCandidate = (candidates) => {
     }
 }
 
+const findFirstHttpClientTag = (config) => {
+  return (config?.http_clients || [])
+    .map((client) => client?.tag)
+    .find((tag) => typeof tag === 'string' && tag.trim()) || ''
+}
+
+const findHttpClientByTag = (config, tag) => {
+  return (config?.http_clients || []).find((client) => client?.tag === tag)
+}
+
+const nextAvailableTag = (config, baseTag) => {
+  const used = new Set(
+    (config?.http_clients || []).map((client) => client?.tag)
+      .concat((config?.outbounds || []).map((outbound) => outbound?.tag))
+      .filter(Boolean)
+  )
+  if (!used.has(baseTag)) return baseTag
+  let index = 2
+  while (used.has(`${baseTag}-${index}`)) {
+    index += 1
+  }
+  return `${baseTag}-${index}`
+}
+
+const hasOutboundTag = (config, tag) => {
+  return (config?.outbounds || []).some((outbound) => outbound?.tag === tag)
+}
+
+const getBridgeOutboundTags = (config) => {
+  return (config?.outbounds || [])
+    .filter((outbound) => outbound?.type === 'bridge' && outbound.tag)
+    .map((outbound) => outbound.tag)
+}
+
+const isPreferredByTag = (preferredBy, tag) => {
+  return toArray(preferredBy).map(String).includes(tag)
+}
+
+const isIcmpBridgeSupported = (version) => {
+  const parsed = parseSingBoxVersionInfo(version)
+  if (!parsed) return true
+  if (parsed.major > 1) return true
+  if (parsed.major < 1) return false
+  if (parsed.minor > 14) return true
+  if (parsed.minor < 14) return false
+  if (parsed.patch > 0) return true
+  if (!parsed.preRelease) return true
+  if (parsed.preRelease !== 'alpha') return true
+  return parsed.preReleaseNumber >= 41
+}
+
+const parseSingBoxVersionInfo = (version) => {
+  const matched = String(version || '').match(/(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.?(\d+)?)?/i)
+  if (!matched) return null
+  return {
+    major: Number(matched[1]),
+    minor: Number(matched[2]),
+    patch: Number(matched[3]),
+    preRelease: String(matched[4] || '').toLowerCase(),
+    preReleaseNumber: Number(matched[5] || 0)
+  }
+}
+
 const getToggleKey = (id) => ({
   'dns-cache': 'dnsCache',
   'cache-file-store-dns': 'cacheFileStoreDns',
@@ -1406,6 +1649,8 @@ const getToggleKey = (id) => ({
   'legacy-dns-outbound': 'legacyDnsOutbound',
   'dns-rule-compatibility': 'dnsRuleCompatibility',
   'remote-ruleset-http-client': 'remoteRuleSetHttpClient',
+  'remote-ruleset-default-http-client': 'remoteRuleSetDefaultHttpClient',
+  'bridge-preferred-by': 'bridgePreferredBy',
   'inline-acme': 'inlineAcme',
   'removed-tailscale-http-client': 'removedTailscaleHttpClient',
   'hysteria-deprecated-fields': 'hysteriaDeprecatedFields',
@@ -1413,7 +1658,8 @@ const getToggleKey = (id) => ({
   'route-default-domain-resolver': 'routeDefaultDomainResolver',
   'dns-optimistic': 'dnsOptimistic',
   'dns-timeout': 'dnsTimeout',
-  'tun-dns-mode': 'tunDnsMode'
+  'tun-dns-mode': 'tunDnsMode',
+  'icmp-bridge': 'icmpBridge'
 })[id]
 
 const getAppliedReportItems = (report) => {
