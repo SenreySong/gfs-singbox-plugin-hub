@@ -1,13 +1,12 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
-const PLUGIN_SOURCE_VERSION = 'v1.1.8'
+const PLUGIN_SOURCE_VERSION = 'v1.1.9'
 const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
 const DEFAULT_GROUPS = [
   {
     id: 'group-hk',
     enabled: true,
     tag: '🇭🇰 HK Group',
-    name: '香港',
     pattern: '(?:🇭🇰|(?:^|[^A-Z])HK\\d*|Hong\\s*Kong|HongKong|香港)',
     extraPattern: ''
   },
@@ -15,7 +14,6 @@ const DEFAULT_GROUPS = [
     id: 'group-tw',
     enabled: true,
     tag: '🇹🇼 TW Group',
-    name: '台湾',
     pattern: '(?:🇹🇼|(?:^|[^A-Z])TW\\d*|Taiwan|台湾|台灣)',
     extraPattern: 'CN2|CFT'
   },
@@ -23,7 +21,6 @@ const DEFAULT_GROUPS = [
     id: 'group-jp',
     enabled: true,
     tag: '🇯🇵 JP Group',
-    name: '日本',
     pattern: '(?:🇯🇵|(?:^|[^A-Z])JP\\d*|Japan|日本)',
     extraPattern: ''
   },
@@ -31,7 +28,6 @@ const DEFAULT_GROUPS = [
     id: 'group-us',
     enabled: true,
     tag: '🇺🇸 US Group',
-    name: '美国',
     pattern: '(?:🇺🇸|(?:^|[^A-Z])US\\d*|United\\s*States|America|美国|美國)',
     extraPattern: ''
   },
@@ -39,7 +35,6 @@ const DEFAULT_GROUPS = [
     id: 'group-au',
     enabled: true,
     tag: '🇦🇺 AU Group',
-    name: '澳大利亚',
     pattern: '(?:🇦🇺|(?:^|[^A-Z])AU\\d*|Australia|澳大利亚|澳洲)',
     extraPattern: ''
   },
@@ -47,7 +42,6 @@ const DEFAULT_GROUPS = [
     id: 'group-de',
     enabled: true,
     tag: '🇩🇪 DE Group',
-    name: '德国',
     pattern: '(?:🇩🇪|(?:^|[^A-Z])DE\\d*|Germany|德国|德國)',
     extraPattern: ''
   }
@@ -140,7 +134,6 @@ const normalizeGroupRules = (groups) => {
       id: String(group?.id || Plugins.sampleID()),
       enabled: group?.enabled !== false,
       tag: String(group?.tag || '').trim(),
-      name: String(group?.name || '').trim(),
       pattern: String(group?.pattern || '').trim(),
       extraPattern: String(group?.extraPattern || '').trim()
     }))
@@ -452,8 +445,8 @@ const openManager = async () => {
                   <Switch v-model="group.enabled">启用</Switch>
                 </div>
                 <div class="font-bold text-13" style="color: #0f172a; flex-shrink: 0;">分组 {{ index + 1 }}</div>
-                <div class="text-12 opacity-70 truncate" :title="group.name || group.tag || '未命名分组'">
-                  {{ group.name || group.tag || '未命名分组' }}
+                <div class="text-12 opacity-70 truncate" :title="group.tag || '未设置 tag'">
+                  {{ group.tag || '未设置 tag' }}
                 </div>
               </div>
               <div class="flex gap-4" style="flex-shrink: 0;">
@@ -481,11 +474,7 @@ const openManager = async () => {
               </div>
             </div>
             <div class="grid gap-8 mt-8" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
-              <div class="min-w-0">
-                <div class="text-11 mb-4" style="color: #64748b;">名称</div>
-                <Input v-model="group.name" placeholder="名称" allow-paste style="width: 100%;" />
-              </div>
-              <div class="min-w-0">
+              <div class="min-w-0" style="grid-column: 1 / -1;">
                 <div class="text-11 mb-4" style="color: #64748b;">策略组 tag</div>
                 <Input v-model="group.tag" placeholder="策略组 tag" allow-paste style="width: 100%;" />
               </div>
@@ -533,7 +522,6 @@ const openManager = async () => {
           id: Plugins.sampleID(),
           enabled: true,
           tag: '',
-          name: '',
           pattern: '',
           extraPattern: ''
         })
@@ -608,13 +596,13 @@ const validateSettings = (settings) => {
     try {
       new RegExp(group.pattern)
     } catch (error) {
-      throw `分组「${group.name || group.tag}」主匹配正则无效：${error.message || error}`
+      throw `分组「${group.tag}」主匹配正则无效：${error.message || error}`
     }
     if (!group.extraPattern) continue
     try {
       new RegExp(group.extraPattern)
     } catch (error) {
-      throw `分组「${group.name || group.tag}」额外条件正则无效：${error.message || error}`
+      throw `分组「${group.tag}」额外条件正则无效：${error.message || error}`
     }
   }
 }
