@@ -1,5 +1,6 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
+const PLUGIN_SOURCE_VERSION = 'v1.1.7'
 const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
 const DEFAULT_GROUPS = [
   {
@@ -560,7 +561,7 @@ const openManager = async () => {
       }
 
       return {
-        pluginVersion: Plugin.version || '',
+        pluginVersion: PLUGIN_SOURCE_VERSION,
         settings,
         preview,
         previewText: Vue.computed(() => preview.value.profileName ? `预览配置：${preview.value.profileName}` : '未找到可预览配置'),
