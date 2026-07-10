@@ -5,7 +5,10 @@ const CHECK_CONFIG_FILE = DATA_DIR + '/check-config.json'
 const DEFAULT_DELAY_URL = 'https://cp.cloudflare.com/generate_204'
 const DEFAULT_SPEED_URL = 'https://speed.cloudflare.com/__down?bytes=25000000'
 const TEST_INBOUND_TAG = '__tcp_speed_test_http__'
-const TEST_SELECTOR_TAG = '__tcp_speed_test__'
+const LEGACY_TEST_SELECTOR_TAG = '__tcp_speed_test__'
+const TEST_AUTH_USERNAME_PREFIX = '__tcp_speed_test_'
+const SPEED_TEST_FILE_NAME = 'speed-test.tmp'
+const SPEED_TEST_FILE = DATA_DIR + '/' + SPEED_TEST_FILE_NAME
 const DEFAULT_TEST_PORT = 7899
 const TEST_OUTBOUND_TYPES = new Set([
   'shadowsocks',
@@ -208,7 +211,7 @@ const openManager = async () => {
             </div>
           </div>
           <div class="rounded-4 p-8 text-12" style="border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af;">
-            开启启动注入后，插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b> 和 selector 策略组 <b>{{ speedSelectorTag }}</b>。默认不注入，避免启用插件本身影响核心启动；修改开关、端口或节点订阅后需要重启核心生效。
+            开启启动注入后，插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b>，并按内部认证用户把测速请求直接路由到对应节点，不会新增可见策略组。默认不注入，避免启用插件本身影响核心启动；修改开关、端口或节点订阅后需要重启核心生效。
           </div>
         </div>
       </Card>
@@ -452,7 +455,6 @@ const openManager = async () => {
           return settings.value.selectedNodeTags.filter((tag) => nodeTags.has(tag)).length
         }),
         speedInboundText: Vue.computed(() => `127.0.0.1:${settings.value.testPort}`),
-        speedSelectorTag: TEST_SELECTOR_TAG,
         selectVisibleNodes,
         clearSelectedNodes,
         nodeCardStyle,
@@ -521,39 +523,44 @@ const createPreviewContext = (overrides = {}) => ({
 
 const injectCurrentCoreSpeedTest = (config, settings) => {
   if (!config || typeof config !== 'object') return
-  const nodes = collectTestNodes(config)
-  const nodeTags = nodes.map((node) => node.tag)
-  if (nodeTags.length === 0) return
   const inbounds = toArray(config.inbounds).filter((inbound) => inbound?.tag !== TEST_INBOUND_TAG)
+  const rules = toArray(config?.route?.rules)
+    .filter((rule) => !toArray(rule?.inbound).includes(TEST_INBOUND_TAG))
+  config.inbounds = inbounds
+  config.outbounds = toArray(config.outbounds).filter((outbound) => outbound?.tag !== LEGACY_TEST_SELECTOR_TAG)
+  if (config.route?.rules) config.route.rules = rules
+
+  const nodes = collectTestNodes(config)
+  if (nodes.length === 0) return
   if (inbounds.some((inbound) => isInboundPortConflict(inbound, settings.testPort))) {
     Plugins.message.warn(`TCP 测速入口端口 ${settings.testPort} 已被其他入站占用，已跳过测速入口注入`)
     return
   }
-  config.inbounds = inbounds
-  config.outbounds = toArray(config.outbounds).filter((outbound) => outbound?.tag !== TEST_SELECTOR_TAG)
+  const credentials = buildSpeedTestCredentials(nodes)
   config.inbounds.push({
     type: 'http',
     tag: TEST_INBOUND_TAG,
     listen: '127.0.0.1',
-    listen_port: settings.testPort
-  })
-  config.outbounds.push({
-    type: 'selector',
-    tag: TEST_SELECTOR_TAG,
-    outbounds: nodeTags,
-    default: nodeTags[0],
-    interrupt_exist_connections: true
+    listen_port: settings.testPort,
+    users: credentials.map(({ username, password }) => ({ username, password }))
   })
   if (!config.route) config.route = {}
-  const rules = toArray(config.route.rules)
-    .filter((rule) => !(toArray(rule?.inbound).includes(TEST_INBOUND_TAG) || rule?.inbound === TEST_INBOUND_TAG))
-  config.route.rules = [
-    {
-      inbound: TEST_INBOUND_TAG,
-      action: 'route',
-      outbound: TEST_SELECTOR_TAG
-    }
-  ].concat(rules)
+  const speedTestRules = credentials.map(({ tag, username }) => ({
+    inbound: TEST_INBOUND_TAG,
+    auth_user: username,
+    action: 'route',
+    outbound: tag
+  }))
+  config.route.rules = speedTestRules.concat(rules)
+}
+
+const buildSpeedTestCredentials = (nodes) => {
+  const password = `${Plugin.id}-${Plugins.sampleID()}`
+  return nodes.map((node, index) => ({
+    tag: node.tag,
+    username: `${TEST_AUTH_USERNAME_PREFIX}${String(index + 1).padStart(4, '0')}`,
+    password
+  }))
 }
 
 const checkSingBoxConfig = async (config) => {
@@ -672,13 +679,10 @@ const executeTests = async (sourceConfig, selectedNodes, settings, reporter = {}
   try {
     reporter.onStatus?.('正在读取当前核心配置', `${total} 个节点`)
     const runtime = await resolveCurrentCoreRuntime(sourceConfig, settings)
-    await ensureCurrentCoreReady(runtime)
+    await ensureCurrentCoreReady(runtime, selectedNodes)
     msg.update?.(`TCP 测试中 0 / ${total}`)
     for (const node of selectedNodes) {
       reporter.onStatus?.(`正在测试 ${node.tag}`, `${completed + 1} / ${total}`)
-      reporter.onNodeStatus?.(node.tag, '切换策略组')
-      await switchSpeedSelector(runtime, node.tag)
-      await Plugins.sleep(200)
       const result = await testSingleNode(runtime, node, settings, reporter)
       results.push(result)
       await reporter.onResult?.(result)
@@ -702,14 +706,48 @@ const resolveCurrentCoreRuntime = async (sourceConfig, settings) => {
   const kernelApiStore = Plugins.useKernelApiStore()
   if (!kernelApiStore.running) throw '当前核心未运行，请启动或重启核心后再测速'
   const runningConfig = await readRunningConfig()
+  if (!runningConfig) throw '无法读取当前核心运行配置，请重启核心后再测速'
   const clashApi = runningConfig?.experimental?.clash_api || sourceConfig?.experimental?.clash_api || {}
   const controller = normalizeController(clashApi.external_controller)
-  if (!controller) throw '当前核心未启用 Clash API，无法切换测速策略组'
+  if (!controller) throw '当前核心未启用 Clash API，无法测试节点延迟'
+  const speedTestRoute = resolveSpeedTestRoute(runningConfig)
+  if (speedTestRoute.port !== Number(settings.testPort)) {
+    throw `当前核心测速入口端口为 ${speedTestRoute.port}，与插件设置 ${settings.testPort} 不一致，请重启核心后再测速`
+  }
   return {
     baseUrl: controller,
     secret: String(clashApi.secret || ''),
-    proxyUrl: `http://127.0.0.1:${settings.testPort}`
+    proxyOrigin: `http://127.0.0.1:${speedTestRoute.port}`,
+    credentialByTag: speedTestRoute.credentialByTag
   }
+}
+
+const resolveSpeedTestRoute = (config) => {
+  const inbound = toArray(config?.inbounds).find((item) => item?.tag === TEST_INBOUND_TAG && item?.type === 'http')
+  if (!inbound) {
+    throw `当前核心未加载测速入口 ${TEST_INBOUND_TAG}，请保存插件设置并重启核心后再测速`
+  }
+  const port = Number(inbound.listen_port)
+  if (!Number.isInteger(port) || port <= 0) {
+    throw `当前核心测速入口 ${TEST_INBOUND_TAG} 端口无效`
+  }
+  const usersByName = new Map(
+    toArray(inbound.users)
+      .filter((user) => String(user?.username || '').trim())
+      .map((user) => [String(user.username), {
+        username: String(user.username),
+        password: String(user.password || '')
+      }])
+  )
+  const credentialByTag = new Map()
+  for (const rule of toArray(config?.route?.rules)) {
+    if (!toArray(rule?.inbound).includes(TEST_INBOUND_TAG) || !rule?.outbound) continue
+    for (const username of toArray(rule.auth_user).map((item) => String(item || ''))) {
+      const credential = usersByName.get(username)
+      if (credential) credentialByTag.set(String(rule.outbound), credential)
+    }
+  }
+  return { port, credentialByTag }
 }
 
 const readRunningConfig = async () => {
@@ -729,54 +767,42 @@ const normalizeController = (controller) => {
   return `http://${value.replace(/\/+$/, '')}`
 }
 
-const ensureCurrentCoreReady = async (runtime) => {
-  const { status, body } = await requestClashApi(runtime, 'GET', '/proxies', null, 3000)
+const ensureCurrentCoreReady = async (runtime, selectedNodes) => {
+  const { status, body } = await requestClashApi(runtime, '/proxies', 3000)
   if (status < 200 || status >= 300) throw `当前核心 Clash API 不可用：${status}`
   const proxies = parseClashProxies(body)
-  if (!Object.prototype.hasOwnProperty.call(proxies, TEST_SELECTOR_TAG)) {
-    throw `当前核心未加载测速策略组 ${TEST_SELECTOR_TAG}，请保存插件设置并重启核心后再测速`
+  const missingProxyTags = selectedNodes
+    .map((node) => node.tag)
+    .filter((tag) => !Object.prototype.hasOwnProperty.call(proxies, tag))
+  if (missingProxyTags.length > 0) {
+    throw `当前核心缺少待测节点：${formatLimitedTags(missingProxyTags)}`
+  }
+  const missingRouteTags = selectedNodes
+    .map((node) => node.tag)
+    .filter((tag) => !runtime.credentialByTag.has(tag))
+  if (missingRouteTags.length > 0) {
+    throw `当前核心缺少待测节点认证路由：${formatLimitedTags(missingRouteTags)}，请重启核心后再测速`
   }
 }
 
-const switchSpeedSelector = async (runtime, tag) => {
-  const { status, body } = await requestClashApi(
-    runtime,
-    'PUT',
-    `/proxies/${encodeURIComponent(TEST_SELECTOR_TAG)}`,
-    { name: tag },
-    3000
-  )
-  if (status < 200 || status >= 300) {
-    throw `切换测速策略组失败：${status}${body ? ` ${String(body).slice(0, 120)}` : ''}`
-  }
+const formatLimitedTags = (tags) => {
+  const visibleTags = tags.slice(0, 5)
+  const suffix = tags.length > visibleTags.length ? ` 等 ${tags.length} 个` : ''
+  return `${visibleTags.join('、')}${suffix}`
 }
 
-const requestClashApi = async (runtime, method, path, body = null, timeout = 3000) => {
+const requestClashApi = async (runtime, path, timeout = 3000) => {
   const headers = {}
   if (runtime.secret) headers.Authorization = `Bearer ${runtime.secret}`
-  if (body !== null) headers['Content-Type'] = 'application/json'
   const url = `${runtime.baseUrl}${path}`
-  const options = {
-    Timeout: timeout
-  }
-  if (body !== null && method === 'PUT') {
-    return await Plugins.HttpPut(url, headers, body, options)
-  }
-  if (body !== null && method === 'POST') {
-    return await Plugins.HttpPost(url, headers, body, options)
-  }
-  if (body !== null && method === 'PATCH') {
-    return await Plugins.HttpPatch(url, headers, body)
-  }
   return await Plugins.Requests({
-    method,
+    method: 'GET',
     url,
-    body: body === null ? undefined : body,
     autoTransformBody: false,
     headers,
     options: {
       Proxy: '',
-      Timeout: timeout
+      Timeout: toRequestTimeoutSeconds(timeout)
     }
   })
 }
@@ -800,11 +826,11 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   try {
     reporter.onStatus?.(`正在测试 ${node.tag}`, 'TCP 延迟')
     reporter.onNodeStatus?.(node.tag, 'TCP 延迟')
-    const tcpDelayMs = await testTcpDelay(runtime, settings)
+    const tcpDelayMs = await testTcpDelay(runtime, node.tag, settings)
     reporter.onResultPatch?.(node.tag, { tcpDelayMs })
     reporter.onStatus?.(`正在测试 ${node.tag}`, `下载测速，延迟 ${tcpDelayMs} ms`)
     reporter.onNodeStatus?.(node.tag, '下载测速')
-    const speed = await testDownloadSpeed(runtime.proxyUrl, settings)
+    const speed = await testDownloadSpeed(buildNodeProxyUrl(runtime, node.tag), settings)
     return {
       ...base,
       tcpDelayMs,
@@ -821,11 +847,20 @@ const testSingleNode = async (runtime, node, settings, reporter = {}) => {
   }
 }
 
-const testTcpDelay = async (runtime, settings) => {
-  const url = new URL(`${runtime.baseUrl}/proxies/${encodeURIComponent(TEST_SELECTOR_TAG)}/delay`)
+const buildNodeProxyUrl = (runtime, tag) => {
+  const credential = runtime.credentialByTag.get(tag)
+  if (!credential) throw `节点 ${tag} 缺少测速认证路由`
+  const proxyUrl = new URL(runtime.proxyOrigin)
+  proxyUrl.username = credential.username
+  proxyUrl.password = credential.password
+  return proxyUrl.toString()
+}
+
+const testTcpDelay = async (runtime, tag, settings) => {
+  const url = new URL(`${runtime.baseUrl}/proxies/${encodeURIComponent(tag)}/delay`)
   url.searchParams.append('url', settings.delayUrl)
   url.searchParams.append('timeout', String(settings.delayTimeout))
-  const { status, body } = await requestClashApi(runtime, 'GET', `${url.pathname}${url.search}`, null, Number(settings.delayTimeout) + 1000)
+  const { status, body } = await requestClashApi(runtime, `${url.pathname}${url.search}`, Number(settings.delayTimeout) + 1000)
   if (status < 200 || status >= 300) {
     throw `TCP 延迟接口失败：${status}`
   }
@@ -852,34 +887,48 @@ const parseJson = (value) => {
 }
 
 const testDownloadSpeed = async (proxyUrl, settings) => {
+  await ensureDataDir()
+  await Plugins.RemoveFile(SPEED_TEST_FILE).catch(() => {})
   const startedAt = Date.now()
-  const { status, body } = await Plugins.Requests({
-    method: 'GET',
-    url: settings.speedUrl,
-    autoTransformBody: false,
-    options: {
-      Proxy: proxyUrl,
-      Timeout: Number(settings.speedTimeout)
+  try {
+    const { status } = await Plugins.Download(
+      settings.speedUrl,
+      SPEED_TEST_FILE,
+      {},
+      undefined,
+      {
+        Proxy: proxyUrl,
+        Timeout: toRequestTimeoutSeconds(settings.speedTimeout)
+      }
+    )
+    if (status < 200 || status >= 300) {
+      throw `测速下载失败：${status}`
     }
-  })
-  if (status < 200 || status >= 300) {
-    throw `测速下载失败：${status}`
-  }
-  const durationMs = Math.max(Date.now() - startedAt, 1)
-  const bytesRead = estimateBodyBytes(body)
-  const speedMbps = Number(((bytesRead * 8) / durationMs / 1000).toFixed(2))
-  return {
-    bytesRead,
-    durationMs,
-    speedMbps
+    const bytesRead = await readSpeedTestFileSize()
+    if (bytesRead <= 0) throw '测速下载未返回有效数据'
+    const durationMs = Math.max(Date.now() - startedAt, 1)
+    const speedMbps = Number(((bytesRead * 8) / durationMs / 1000).toFixed(2))
+    return {
+      bytesRead,
+      durationMs,
+      speedMbps
+    }
+  } finally {
+    await Plugins.RemoveFile(SPEED_TEST_FILE).catch(() => {})
   }
 }
 
-const estimateBodyBytes = (body) => {
-  if (typeof body === 'string') return new TextEncoder().encode(body).length
-  if (body instanceof ArrayBuffer) return body.byteLength
-  if (ArrayBuffer.isView(body)) return body.byteLength
-  return 0
+const readSpeedTestFileSize = async () => {
+  const files = await Plugins.ReadDir(DATA_DIR)
+  const file = files.find((item) => item?.name === SPEED_TEST_FILE_NAME && !item.isDir)
+  const size = Number(file?.size)
+  return Number.isFinite(size) && size > 0 ? size : 0
+}
+
+const toRequestTimeoutSeconds = (milliseconds) => {
+  const value = Number(milliseconds)
+  if (!Number.isFinite(value) || value <= 0) return 1
+  return Math.max(1, Math.ceil(value / 1000))
 }
 
 const formatTime = (timestamp) => {
