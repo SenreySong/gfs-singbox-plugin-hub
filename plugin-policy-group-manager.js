@@ -380,8 +380,10 @@ const openManager = async () => {
     template: `
     <div class="flex flex-col gap-8 pr-8" style="color: #334155;">
       <div class="flex items-center justify-between gap-8">
-        <div class="min-w-0">
-          <div class="font-bold text-16" style="color: #0f172a;">策略组自动整理 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
+        <div class="flex items-center gap-8 min-w-0">
+          <div class="text-12" style="padding: 2px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #334155; flex-shrink: 0;">
+            {{ pluginVersion }}
+          </div>
           <div class="text-12 opacity-70 truncate" :title="previewText">{{ previewText }}</div>
         </div>
         <div class="flex gap-8" style="flex-shrink: 0;">
@@ -443,32 +445,56 @@ const openManager = async () => {
             class="rounded-4 p-8"
             style="border: 1px solid #cbd5e1; background: #f8fafc;"
           >
-            <div class="grid gap-8" style="grid-template-columns: 72px minmax(120px, 0.7fr) minmax(180px, 1.3fr) auto; align-items: end;">
-              <div class="flex items-end" style="height: 100%; width: 72px;">
-                <Switch v-model="group.enabled">启用</Switch>
+            <div class="flex items-center justify-between gap-8">
+              <div class="flex items-center gap-8 min-w-0">
+                <div style="width: 72px; flex: 0 0 72px;">
+                  <Switch v-model="group.enabled">启用</Switch>
+                </div>
+                <div class="font-bold text-13" style="color: #0f172a; flex-shrink: 0;">分组 {{ index + 1 }}</div>
+                <div class="text-12 opacity-70 truncate" :title="group.name || group.tag || '未命名分组'">
+                  {{ group.name || group.tag || '未命名分组' }}
+                </div>
               </div>
+              <div class="flex gap-4" style="flex-shrink: 0;">
+                <button
+                  type="button"
+                  title="上移"
+                  aria-label="上移"
+                  :disabled="index === 0"
+                  style="width: 30px; height: 30px; padding: 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; color: #334155; cursor: pointer; line-height: 1;"
+                  @click="moveGroupUp(index)"
+                >↑</button>
+                <button
+                  type="button"
+                  title="下移"
+                  aria-label="下移"
+                  :disabled="index === settings.groups.length - 1"
+                  style="width: 30px; height: 30px; padding: 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; color: #334155; cursor: pointer; line-height: 1;"
+                  @click="moveGroupDown(index)"
+                >↓</button>
+                <button
+                  type="button"
+                  style="height: 30px; padding: 0 8px; border: 1px solid #fecaca; border-radius: 4px; background: #ffffff; color: #dc2626; cursor: pointer; white-space: nowrap;"
+                  @click="removeGroup(index)"
+                >删除</button>
+              </div>
+            </div>
+            <div class="grid gap-8 mt-8" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
               <div class="min-w-0">
                 <div class="text-11 mb-4" style="color: #64748b;">名称</div>
-                <Input v-model="group.name" placeholder="名称" allow-paste />
+                <Input v-model="group.name" placeholder="名称" allow-paste style="width: 100%;" />
               </div>
               <div class="min-w-0">
                 <div class="text-11 mb-4" style="color: #64748b;">策略组 tag</div>
-                <Input v-model="group.tag" placeholder="策略组 tag" allow-paste />
+                <Input v-model="group.tag" placeholder="策略组 tag" allow-paste style="width: 100%;" />
               </div>
-              <div class="flex gap-2 justify-end" style="flex-shrink: 0;">
-                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px;" @click="moveGroupUp(index)" :disabled="index === 0">上移</Button>
-                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px;" @click="moveGroupDown(index)" :disabled="index === settings.groups.length - 1">下移</Button>
-                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px; color: #dc2626;" @click="removeGroup(index)">删除</Button>
-              </div>
-            </div>
-            <div class="grid gap-8 mt-8" style="grid-template-columns: minmax(220px, 1.35fr) minmax(180px, 1fr);">
               <div class="min-w-0">
                 <div class="text-11 mb-4" style="color: #64748b;">主匹配正则</div>
-                <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste />
+                <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste style="width: 100%;" />
               </div>
               <div class="min-w-0">
                 <div class="text-11 mb-4" style="color: #64748b;">额外条件</div>
-                <Input v-model="group.extraPattern" placeholder="可留空" allow-paste />
+                <Input v-model="group.extraPattern" placeholder="可留空" allow-paste style="width: 100%;" />
               </div>
             </div>
           </div>

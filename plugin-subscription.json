@@ -70,7 +70,7 @@
   {
     "id": "plugin-policy-group-manager",
     "name": "策略组自动整理",
-    "version": "v1.1.5",
+    "version": "v1.1.6",
     "group": "Extensions",
     "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未命中节点，并跳过隐藏和内部测速策略组。 作者：SenreySong",
     "tags": [
