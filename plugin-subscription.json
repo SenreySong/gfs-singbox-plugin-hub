@@ -70,7 +70,7 @@
   {
     "id": "plugin-policy-group-manager",
     "name": "策略组自动整理",
-    "version": "v1.1.7",
+    "version": "v1.1.8",
     "group": "Extensions",
     "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未命中节点，并跳过隐藏和内部测速策略组。 作者：SenreySong",
     "tags": [
@@ -79,7 +79,7 @@
       "策略组"
     ],
     "type": "Http",
-    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-policy-group-manager.js?v=1.1.7",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/policy-group-v1.1.8/plugin-policy-group-manager.js",
     "path": "data/plugins/plugin-policy-group-manager.js",
     "triggers": [
       "on::manual",

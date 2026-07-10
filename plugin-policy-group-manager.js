@@ -1,6 +1,6 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
-const PLUGIN_SOURCE_VERSION = 'v1.1.7'
+const PLUGIN_SOURCE_VERSION = 'v1.1.8'
 const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
 const DEFAULT_GROUPS = [
   {
