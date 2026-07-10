@@ -232,11 +232,12 @@ const buildGroupSelectors = (nodes, groupRules, settings) => {
   const groupTags = new Set(groupRules.map((group) => group.tag))
 
   for (const node of nodes) {
-    const matchedGroup = groupRules.find((group) => matchGroupPattern(node.tag, group))
-    if (!matchedGroup) continue
-    matchedNodeTags.add(node.tag)
-    if (!matchGroupExtraPattern(node.tag, matchedGroup)) continue
-    groupedNodeTags.get(matchedGroup.tag).push(node.tag)
+    for (const group of groupRules) {
+      if (!matchGroupPattern(node.tag, group)) continue
+      matchedNodeTags.add(node.tag)
+      if (!matchGroupExtraPattern(node.tag, group)) continue
+      groupedNodeTags.get(group.tag).push(node.tag)
+    }
   }
 
   const selectors = groupRules.flatMap((group) => {
@@ -263,10 +264,6 @@ const buildSelector = (tag, outbounds) => ({
   outbounds: unique(outbounds),
   interrupt_exist_connections: false
 })
-
-const matchGroupRule = (tag, group) => {
-  return matchGroupPattern(tag, group) && matchGroupExtraPattern(tag, group)
-}
 
 const matchGroupPattern = (tag, group) => safeRegexTest(group.pattern, tag)
 
@@ -381,37 +378,53 @@ const openManager = async () => {
 
   const component = {
     template: `
-    <div class="flex flex-col gap-10 pr-8">
+    <div class="flex flex-col gap-8 pr-8" style="color: #334155;">
       <div class="flex items-center justify-between gap-8">
         <div class="min-w-0">
-          <div class="font-bold text-16">策略组自动整理 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
+          <div class="font-bold text-16" style="color: #0f172a;">策略组自动整理 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
           <div class="text-12 opacity-70 truncate" :title="previewText">{{ previewText }}</div>
         </div>
-        <div class="flex gap-8">
+        <div class="flex gap-8" style="flex-shrink: 0;">
           <Button @click="refreshPreview">刷新预览</Button>
           <Button type="primary" @click="save">保存</Button>
         </div>
       </div>
 
       <Card>
-        <div class="grid gap-10" style="grid-template-columns: 160px minmax(0, 1fr); align-items: center;">
-          <div class="font-bold text-13">启用插件</div>
-          <Switch v-model="settings.enabled">启用</Switch>
+        <div class="font-bold text-13 mb-8" style="color: #0f172a;">基础设置</div>
+        <div class="grid gap-10" style="grid-template-columns: repeat(2, minmax(220px, 1fr)); align-items: center;">
+          <div class="flex items-center justify-between gap-8">
+            <div class="text-12">启用插件</div>
+            <div style="width: 72px; flex: 0 0 72px;">
+              <Switch v-model="settings.enabled">启用</Switch>
+            </div>
+          </div>
 
-          <div class="font-bold text-13">插入位置</div>
-          <select v-model="settings.insertPosition" class="gfs-native-input">
-            <option value="before">插入到策略组前面</option>
-            <option value="after">追加到策略组后面</option>
-          </select>
+          <div class="flex items-center justify-between gap-8">
+            <div class="text-12">插入位置</div>
+            <select v-model="settings.insertPosition" class="gfs-native-input" style="width: 190px; max-width: 65%;">
+              <option value="before">插入到策略组前面</option>
+              <option value="after">追加到策略组后面</option>
+            </select>
+          </div>
 
-          <div class="font-bold text-13">跳过隐藏策略组</div>
-          <Switch v-model="settings.skipHiddenSelectors">跳过</Switch>
+          <div class="flex items-center justify-between gap-8">
+            <div class="text-12">跳过隐藏策略组</div>
+            <div style="width: 72px; flex: 0 0 72px;">
+              <Switch v-model="settings.skipHiddenSelectors">跳过</Switch>
+            </div>
+          </div>
 
-          <div class="font-bold text-13">启用 Other 组</div>
-          <Switch v-model="settings.otherGroupEnabled">启用</Switch>
-
-          <div class="font-bold text-13">Other 组名称</div>
-          <Input v-model="settings.otherGroupTag" placeholder="🌐 Other Group" allow-paste />
+          <div class="flex items-center justify-between gap-8">
+            <div class="text-12">启用 Other 组</div>
+            <div style="width: 72px; flex: 0 0 72px;">
+              <Switch v-model="settings.otherGroupEnabled">启用</Switch>
+            </div>
+          </div>
+        </div>
+        <div class="grid items-center gap-8 mt-10" style="grid-template-columns: 112px minmax(0, 1fr);">
+          <div class="text-12">Other 组名称</div>
+          <Input v-model="settings.otherGroupTag" placeholder="🌐 Other Group" allow-paste :disabled="!settings.otherGroupEnabled" />
         </div>
       </Card>
 
@@ -419,26 +432,44 @@ const openManager = async () => {
         <div class="flex items-center justify-between gap-8 mb-8">
           <div class="min-w-0">
             <div class="font-bold text-13">分组规则</div>
-            <div class="text-12 opacity-70">节点按规则顺序匹配，主规则识别后不会进入 Other 组；额外条件只决定是否进入对应策略组。</div>
+            <div class="text-12 opacity-70">节点会加入所有命中的分组；命中任一主规则后不会进入 Other 组；额外条件只决定是否进入对应策略组。</div>
           </div>
           <Button @click="addGroup">新增分组</Button>
         </div>
-        <div class="flex flex-col gap-8" style="max-height: 360px; overflow: auto;">
+        <div class="flex flex-col gap-8" style="max-height: 440px; overflow-y: auto; overflow-x: hidden;">
           <div
             v-for="(group, index) in settings.groups"
             :key="group.id"
-            class="grid items-center gap-8 rounded-4 p-8"
-            style="grid-template-columns: 70px minmax(100px, 140px) minmax(160px, 1fr) minmax(220px, 1.4fr) minmax(150px, 1fr) 136px; border: 1px solid #cbd5e1; background: #f8fafc;"
+            class="rounded-4 p-8"
+            style="border: 1px solid #cbd5e1; background: #f8fafc;"
           >
-            <Switch v-model="group.enabled">启用</Switch>
-            <Input v-model="group.name" placeholder="名称" allow-paste />
-            <Input v-model="group.tag" placeholder="策略组 tag" allow-paste />
-            <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste />
-            <Input v-model="group.extraPattern" placeholder="额外条件正则，可空" allow-paste />
-            <div class="flex gap-4 justify-end">
-              <Button @click="moveGroupUp(index)" :disabled="index === 0">上移</Button>
-              <Button @click="moveGroupDown(index)" :disabled="index === settings.groups.length - 1">下移</Button>
-              <Button type="text" @click="removeGroup(index)">删除</Button>
+            <div class="grid gap-8" style="grid-template-columns: 72px minmax(120px, 0.7fr) minmax(180px, 1.3fr) auto; align-items: end;">
+              <div class="flex items-end" style="height: 100%; width: 72px;">
+                <Switch v-model="group.enabled">启用</Switch>
+              </div>
+              <div class="min-w-0">
+                <div class="text-11 mb-4" style="color: #64748b;">名称</div>
+                <Input v-model="group.name" placeholder="名称" allow-paste />
+              </div>
+              <div class="min-w-0">
+                <div class="text-11 mb-4" style="color: #64748b;">策略组 tag</div>
+                <Input v-model="group.tag" placeholder="策略组 tag" allow-paste />
+              </div>
+              <div class="flex gap-2 justify-end" style="flex-shrink: 0;">
+                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px;" @click="moveGroupUp(index)" :disabled="index === 0">上移</Button>
+                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px;" @click="moveGroupDown(index)" :disabled="index === settings.groups.length - 1">下移</Button>
+                <Button type="text" style="width: auto; min-width: 0; padding-left: 6px; padding-right: 6px; color: #dc2626;" @click="removeGroup(index)">删除</Button>
+              </div>
+            </div>
+            <div class="grid gap-8 mt-8" style="grid-template-columns: minmax(220px, 1.35fr) minmax(180px, 1fr);">
+              <div class="min-w-0">
+                <div class="text-11 mb-4" style="color: #64748b;">主匹配正则</div>
+                <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste />
+              </div>
+              <div class="min-w-0">
+                <div class="text-11 mb-4" style="color: #64748b;">额外条件</div>
+                <Input v-model="group.extraPattern" placeholder="可留空" allow-paste />
+              </div>
             </div>
           </div>
           <div v-if="settings.groups.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
@@ -448,6 +479,10 @@ const openManager = async () => {
       </Card>
 
       <Card>
+        <div class="flex items-center justify-between gap-8 mb-8">
+          <div class="font-bold text-13" style="color: #0f172a;">生成预览</div>
+          <div class="text-12 opacity-70">{{ preview.groups.length }} 个策略组</div>
+        </div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">
           <div v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
             <div class="font-bold text-13">{{ group.tag }}</div>
