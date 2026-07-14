@@ -876,7 +876,6 @@ const migrateRemoteRuleSetDefaultHttpClient = (config, report) => {
     return ruleSet && typeof ruleSet === 'object' && ruleSet.type === 'remote' && ruleSet.url
   })
   if (remoteRuleSets.length === 0) return
-  if (!remoteRuleSets.some((ruleSet) => ruleSet.http_client === undefined)) return
   if (!config.route) config.route = {}
   if (config.route.default_http_client) return
 

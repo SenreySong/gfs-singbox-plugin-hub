@@ -82,7 +82,7 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 
 - 在启动核心前处理最终生成配置，用于适配 sing-box 测试版核心的新配置要求。
 - 处理 1.14 相关 DNS/TUN/HTTP/ACME 配置迁移。
-- 处理 1.14 远程规则集 HTTP client 显式化，避免 `download_detour` 和隐式默认 HTTP client 警告。
+- 处理 1.14 远程规则集 HTTP client 显式化，并配置共享默认 HTTP client，避免 `download_detour` 和隐式默认 HTTP client 警告。
 - 修正 bridge 出站规则里的 `preferred_by`，避免把 `bridge` 类型名误写成出站 tag。
 - 支持注入 ICMP bridge 出站和前置 ICMP 路由规则，让 ping 流量直接三层转发。
 - 支持强制类转换和推荐类转换的分区展示。
