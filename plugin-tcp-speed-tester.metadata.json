@@ -1,7 +1,7 @@
 {
   "id": "plugin-tcp-speed-tester",
   "name": "TCP 延迟与测速",
-  "version": "v1.1.6",
+  "version": "v1.1.7",
   "group": "Extensions",
   "description": "选择节点通过当前运行核心执行 TCP 延迟与流式下载测速，可显式开启认证测速入口，按节点路由且不新增可见策略组。 作者：SenreySong",
   "tags": [

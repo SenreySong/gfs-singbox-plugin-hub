@@ -297,7 +297,7 @@ const openManager = async (profile) => {
       <div class="grid items-center gap-8" style="grid-template-columns: minmax(0, 1fr) 220px auto auto;">
         <div class="flex items-center gap-8 min-w-0">
           <div class="font-bold text-16 truncate" :title="profileName + ' 节点中转'">{{ profileName }} 节点中转</div>
-          <div class="text-12 shrink-0" style="padding: 2px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #334155;">
+          <div class="text-12 shrink-0" style="padding: 2px 6px; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--card-hover-bg); color: var(--card-color);">
             {{ pluginVersion }}
           </div>
         </div>
@@ -316,15 +316,15 @@ const openManager = async (profile) => {
           >
             <div class="min-w-0">
               <div class="flex items-center gap-4">
-                <span class="text-12" style="color: #64748b;">节点</span>
-                <span class="text-12" style="color: #64748b;">{{ getRegionLabel(rule.sourceTag) }}</span>
-                <span class="text-12" style="color: #94a3b8;">{{ getOutboundType(rule.sourceTag) }}</span>
+                <span class="text-12" style="color: var(--card-color);">节点</span>
+                <span class="text-12" style="color: var(--card-color);">{{ getRegionLabel(rule.sourceTag) }}</span>
+                <span class="text-12" style="color: var(--card-color); opacity: 0.72;">{{ getOutboundType(rule.sourceTag) }}</span>
               </div>
               <div class="font-bold text-13 truncate" :title="rule.sourceTag">{{ rule.sourceTag }}</div>
             </div>
 
             <button type="button" :style="relayButtonStyle" :title="renderRelayLabel(rule)" @click="openRelayPicker(rule)">
-              <div class="text-12" style="color: #64748b;">中转节点</div>
+              <div class="text-12" style="color: var(--card-color);">中转节点</div>
               <div class="font-bold text-13 truncate">{{ renderRelayLabel(rule) }}</div>
             </button>
 
@@ -347,7 +347,7 @@ const openManager = async (profile) => {
       </Card>
 
       <div class="flex items-center justify-between gap-8">
-        <div class="text-12" style="color: #64748b;">
+        <div class="text-12" style="color: var(--card-color);">
           保存内容只写入插件目录，不修改订阅和 GUI 配置；核心启动前会按当前配置写入 detour。
         </div>
         <div class="flex items-center gap-8">
@@ -359,13 +359,13 @@ const openManager = async (profile) => {
     `,
     setup() {
       const relayButtonStyle =
-        'width: 100%; min-height: 44px; padding: 4px 8px; border: 1px solid #94a3b8; border-radius: 4px; background: #ffffff; color: #0f172a; cursor: pointer; text-align: left; overflow: hidden;'
+        'width: 100%; min-height: 44px; padding: 4px 8px; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--input-bg); color: var(--color); cursor: pointer; text-align: left; overflow: hidden;'
       const ruleRowBaseStyle =
         'display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(120px, 0.8fr) 74px 58px; align-items: center; gap: 8px;'
       const optionButtonStyle =
-        'width: 100%; min-height: 96px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #ffffff; color: #0f172a; cursor: pointer; text-align: left; overflow: hidden;'
+        'width: 100%; min-height: 96px; padding: 10px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-bg); color: var(--color); cursor: pointer; text-align: left; overflow: hidden;'
       const clearOptionButtonStyle =
-        'width: 100%; min-height: 54px; padding: 10px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; color: #92400e; cursor: pointer; text-align: left; overflow: hidden;'
+        'width: 100%; min-height: 54px; padding: 10px; border: 1px solid var(--level-2-color); border-radius: 6px; background: color-mix(in srgb, var(--card-bg) 88%, var(--level-2-color) 12%); color: var(--level-2-color); cursor: pointer; text-align: left; overflow: hidden;'
       const draftLinks = computed(() => buildValidatedLinks(rules.value, context, { throwOnCycle: false }))
 
       const getOutboundType = (tag) => {
@@ -396,20 +396,20 @@ const openManager = async (profile) => {
       }
 
       const getRuleStatusStyle = (rule) => {
-        if (!rule.enabled) return 'color: #64748b;'
-        if (!rule.relayTag) return 'color: #64748b;'
+        if (!rule.enabled) return 'color: var(--card-color);'
+        if (!rule.relayTag) return 'color: var(--card-color);'
         if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能') || getRuleWarning(rule).includes('不存在')) {
-          return 'color: #dc2626;'
+          return 'color: var(--level-4-color);'
         }
-        return 'color: #166534;'
+        return 'color: var(--level-1-color);'
       }
 
       const getRuleRowStyle = (rule) => {
-        if (!rule.enabled) return `${ruleRowBaseStyle} border: 1px solid #cbd5e1; background: #f8fafc; opacity: 0.72;`
+        if (!rule.enabled) return `${ruleRowBaseStyle} border: 1px solid var(--divider-color); background: var(--card-bg); color: var(--color); opacity: 0.72;`
         if (getRuleWarning(rule).includes('循环') || getRuleWarning(rule).includes('不能') || getRuleWarning(rule).includes('不存在')) {
-          return `${ruleRowBaseStyle} border: 1px solid #fca5a5; background: #fff7f7;`
+          return `${ruleRowBaseStyle} border: 1px solid var(--level-4-color); background: color-mix(in srgb, var(--card-bg) 88%, var(--level-4-color) 12%); color: var(--color);`
         }
-        return `${ruleRowBaseStyle} border: 1px solid #86efac; background: #f7fff9;`
+        return `${ruleRowBaseStyle} border: 1px solid var(--level-1-color); background: color-mix(in srgb, var(--card-bg) 88%, var(--level-1-color) 12%); color: var(--color);`
       }
 
       const getOptionTitle = (option) => option.value
@@ -420,10 +420,10 @@ const openManager = async (profile) => {
 
       const getPickerOptionStyle = (selected, disabled = false) => {
         const base =
-          'width: 100%; min-height: 58px; padding: 8px; border-radius: 6px; color: #0f172a; text-align: left; overflow: hidden;'
-        if (disabled) return `${base} border: 1px solid #e2e8f0; background: #f8fafc; opacity: 0.45; cursor: not-allowed;`
-        if (selected) return `${base} border: 1px solid #2563eb; background: #eff6ff; cursor: pointer;`
-        return `${base} border: 1px solid #cbd5e1; background: #ffffff; cursor: pointer;`
+          'width: 100%; min-height: 58px; padding: 8px; border-radius: 6px; color: var(--color); text-align: left; overflow: hidden;'
+        if (disabled) return `${base} border: 1px solid var(--divider-color); background: var(--card-bg); opacity: 0.45; cursor: not-allowed;`
+        if (selected) return `${base} border: 1px solid var(--primary-color); background: color-mix(in srgb, var(--card-bg) 82%, var(--primary-color) 18%); cursor: pointer;`
+        return `${base} border: 1px solid var(--divider-color); background: var(--card-bg); cursor: pointer;`
       }
 
       const sortRows = () => {
@@ -514,7 +514,7 @@ const openManager = async (profile) => {
                     @click="toggleSource(option.value)"
                   >
                     <div class="flex items-center justify-between gap-6">
-                      <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                      <div class="text-12" style="color: var(--card-color);">{{ getOptionMeta(option) }}</div>
                       <input type="checkbox" :checked="isSourceSelected(option.value)" @click.stop="toggleSource(option.value)" />
                     </div>
                     <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
@@ -538,7 +538,7 @@ const openManager = async (profile) => {
                     :disabled="isRelayPickerDisabled"
                     @click="selectRelay(option.value)"
                   >
-                    <div class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</div>
+                    <div class="text-12" style="color: var(--card-color);">{{ getOptionMeta(option) }}</div>
                     <div class="font-bold text-13 truncate">{{ getOptionTitle(option) }}</div>
                   </button>
                   <div v-if="relayOptions.length === 0" class="flex items-center justify-center min-h-[96px] border border-dashed rounded-4">
@@ -549,7 +549,7 @@ const openManager = async (profile) => {
             </div>
 
             <div class="flex items-center justify-between gap-8">
-              <div class="text-12 truncate" style="color: #64748b;" :title="selectedSummary">
+              <div class="text-12 truncate" style="color: var(--card-color);" :title="selectedSummary">
                 {{ selectedSummary }}
               </div>
               <Button type="primary" @click="addSelectedRule" :disabled="selectedSourceTags.length === 0 || (selectedSourceTags.length === 1 && !selectedRelayTag)">添加中转</Button>
@@ -656,7 +656,7 @@ const openManager = async (profile) => {
             <Input v-model="pickerKeyword" placeholder="搜索节点、类型或地区" allow-paste />
             <button type="button" :style="clearOptionButtonStyle" @click="chooseRelay('')">
               <div class="font-bold text-13">无中转</div>
-              <div class="text-12" style="color: #92400e;">清空当前节点的中转设置</div>
+              <div class="text-12" style="color: var(--level-2-color);">清空当前节点的中转设置</div>
             </button>
             <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); max-height: 360px; overflow: auto;">
               <button
@@ -668,8 +668,8 @@ const openManager = async (profile) => {
                 @click="chooseRelay(option.value)"
               >
                 <div class="flex items-center justify-between gap-6">
-                  <span class="text-12" style="color: #64748b;">{{ getOptionMeta(option) }}</span>
-                  <span v-if="option.value === rule.relayTag" class="text-12" style="color: #166534;">已选</span>
+                  <span class="text-12" style="color: var(--card-color);">{{ getOptionMeta(option) }}</span>
+                  <span v-if="option.value === rule.relayTag" class="text-12" style="color: var(--level-1-color);">已选</span>
                 </div>
                 <div class="font-bold text-13 leading-5" style="word-break: break-word;">{{ getOptionTitle(option) }}</div>
               </button>

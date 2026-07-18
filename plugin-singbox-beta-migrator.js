@@ -1237,10 +1237,10 @@ const openManager = async () => {
       <Card>
         <div class="font-bold text-14 mb-8">强制类转换</div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));">
-          <div v-for="item in forceItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+          <div v-for="item in forceItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);">
             <div class="font-bold text-13">{{ item.title }}</div>
             <div class="text-12 opacity-75 mt-4">{{ item.description }}</div>
-            <div class="text-12 mt-6" style="color: #166534;">预览命中 {{ getReportCount(item.id) }} 项</div>
+            <div class="text-12 mt-6" style="color: var(--level-1-color);">预览命中 {{ getReportCount(item.id) }} 项</div>
           </div>
         </div>
       </Card>
@@ -1248,7 +1248,7 @@ const openManager = async () => {
       <Card>
         <div class="font-bold text-14 mb-8">推荐类转换</div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
-          <div v-for="item in recommendItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+          <div v-for="item in recommendItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);">
             <div class="flex items-start justify-between gap-8">
               <div class="min-w-0">
                 <div class="font-bold text-13">{{ item.title }}</div>
@@ -1256,7 +1256,7 @@ const openManager = async () => {
               </div>
               <Switch v-model="settings.recommendationToggles[item.toggleKey]">启用</Switch>
             </div>
-            <div class="text-12 mt-6" style="color: #166534;">预览命中 {{ getReportCount(item.id) }} 项</div>
+            <div class="text-12 mt-6" style="color: var(--level-1-color);">预览命中 {{ getReportCount(item.id) }} 项</div>
           </div>
         </div>
       </Card>
@@ -1272,7 +1272,7 @@ const openManager = async () => {
           <Input v-model="settings.featureOptions.icmpBridgeInterface" placeholder="可空；例如 en0，留空则由核心选择默认接口" allow-paste />
         </div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));">
-          <div v-for="item in featureItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+          <div v-for="item in featureItems" :key="item.id" class="rounded-4 p-8" style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);">
             <div class="flex items-start justify-between gap-8">
               <div class="min-w-0">
                 <div class="font-bold text-13">{{ item.title }}</div>
@@ -1280,7 +1280,7 @@ const openManager = async () => {
               </div>
               <Switch v-model="settings.featureToggles[item.toggleKey]">启用</Switch>
             </div>
-            <div class="text-12 mt-6" style="color: #166534;">预览命中 {{ getReportCount(item.id) }} 项</div>
+            <div class="text-12 mt-6" style="color: var(--level-1-color);">预览命中 {{ getReportCount(item.id) }} 项</div>
           </div>
         </div>
       </Card>
@@ -1317,7 +1317,7 @@ const openManager = async () => {
           v-model="runtimeConfig.content"
           readonly
           class="w-full p-8 rounded border outline-none resize-none font-mono text-12 box-border"
-          style="height: 360px; background: transparent; color: inherit; border-color: var(--el-border-color); box-sizing: border-box; line-height: 1.45;"
+          style="height: 360px; background: transparent; color: inherit; border-color: var(--divider-color); box-sizing: border-box; line-height: 1.45;"
         ></textarea>
       </Card>
     </div>

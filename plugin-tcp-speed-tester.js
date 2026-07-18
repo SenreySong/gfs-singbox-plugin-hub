@@ -164,15 +164,15 @@ const openManager = async () => {
 
   const component = {
     template: `
-    <div class="flex flex-col gap-10 pr-8" style="color: #334155;">
+    <div class="flex flex-col gap-10 pr-8" style="color: var(--color);">
       <div class="flex items-start justify-between gap-12">
         <div class="min-w-0 flex flex-col gap-4">
-          <div class="font-bold text-16" style="color: #0f172a;">TCP 延迟与测速 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
+          <div class="font-bold text-16" style="color: var(--color);">TCP 延迟与测速 <span class="text-12 opacity-70">{{ pluginVersion }}</span></div>
           <div class="text-12 opacity-70 truncate" :title="summaryText">{{ summaryText }}</div>
           <div class="flex gap-6 text-11" style="flex-wrap: wrap;">
-            <span class="rounded-4 px-8 py-3" style="background: #eff6ff; color: #1d4ed8;">节点 {{ preview.nodes.length }}</span>
-            <span class="rounded-4 px-8 py-3" style="background: #ecfdf5; color: #047857;">已选 {{ selectedNodeCount }}</span>
-            <span class="rounded-4 px-8 py-3" style="background: #f1f5f9; color: #475569;">入口 127.0.0.1:{{ settings.testPort }}</span>
+            <span class="rounded-4 px-8 py-3" style="border: 1px solid var(--primary-color); background: color-mix(in srgb, var(--card-bg) 84%, var(--primary-color) 16%); color: var(--primary-color);">节点 {{ preview.nodes.length }}</span>
+            <span class="rounded-4 px-8 py-3" style="border: 1px solid var(--level-1-color); background: color-mix(in srgb, var(--card-bg) 88%, var(--level-1-color) 12%); color: var(--level-1-color);">已选 {{ selectedNodeCount }}</span>
+            <span class="rounded-4 px-8 py-3" style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--card-color);">入口 127.0.0.1:{{ settings.testPort }}</span>
           </div>
         </div>
         <div class="flex gap-8" style="flex-shrink: 0;">
@@ -186,7 +186,7 @@ const openManager = async () => {
         <div class="flex flex-col gap-10">
           <div class="grid gap-10" style="grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr);">
             <div class="flex flex-col gap-8">
-              <div class="font-bold text-13" style="color: #0f172a;">测试地址</div>
+              <div class="font-bold text-13" style="color: var(--color);">测试地址</div>
               <div class="grid items-center gap-8" style="grid-template-columns: 76px minmax(0, 1fr);">
                 <div class="text-12 opacity-70">延迟</div>
                 <Input v-model="settings.delayUrl" allow-paste :disabled="running" />
@@ -195,7 +195,7 @@ const openManager = async () => {
               </div>
             </div>
             <div class="flex flex-col gap-8">
-              <div class="font-bold text-13" style="color: #0f172a;">运行参数</div>
+              <div class="font-bold text-13" style="color: var(--color);">运行参数</div>
               <div class="grid items-center gap-8" style="grid-template-columns: 96px minmax(0, 1fr);">
                 <div class="text-12 opacity-70">延迟超时</div>
                 <Input v-model="settings.delayTimeout" type="number" editable :disabled="running" />
@@ -210,7 +210,7 @@ const openManager = async () => {
               </div>
             </div>
           </div>
-          <div class="rounded-4 p-8 text-12" style="border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af;">
+          <div class="rounded-4 p-8 text-12" style="border: 1px solid var(--primary-color); background: color-mix(in srgb, var(--card-bg) 88%, var(--primary-color) 12%); color: var(--color);">
             开启启动注入后，插件会在核心启动前注入 HTTP 测速入站 <b>{{ speedInboundText }}</b>，并按内部认证用户把测速请求直接路由到对应节点，不会新增可见策略组。默认不注入，避免启用插件本身影响核心启动；修改开关、端口或节点订阅后需要重启核心生效。
           </div>
         </div>
@@ -219,7 +219,7 @@ const openManager = async () => {
       <Card>
         <div class="flex items-center justify-between gap-10 mb-8">
           <div>
-            <div class="font-bold text-14" style="color: #0f172a;">节点</div>
+            <div class="font-bold text-14" style="color: var(--color);">节点</div>
             <div class="text-12 opacity-70">已选 {{ selectedNodeCount }} / {{ preview.nodes.length }}，当前显示 {{ filteredNodes.length }} 个</div>
           </div>
           <div class="flex items-center gap-8" style="min-width: min(420px, 100%); flex-wrap: wrap;">
@@ -235,7 +235,7 @@ const openManager = async () => {
               <div class="min-w-0">
                 <div class="font-bold text-12 truncate" :title="node.tag">{{ node.tag }}</div>
                 <div class="text-11 opacity-70">{{ node.type }}</div>
-                <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: #0f766e;">
+                <div v-if="node.chainInfo.isChained" class="text-11 mt-4" style="color: var(--level-1-color);">
                   链式代理：{{ node.chainInfo.chainText }}
                 </div>
               </div>
@@ -257,7 +257,7 @@ const openManager = async () => {
         <div class="overflow-x-auto">
           <table class="w-full text-12" style="border-collapse: collapse;">
             <thead>
-              <tr style="border-bottom: 1px solid #cbd5e1;">
+              <tr style="border-bottom: 1px solid var(--divider-color);">
                 <th class="text-left p-6">节点</th>
                 <th class="text-left p-6">类型</th>
                 <th class="text-left p-6">链式代理</th>
@@ -269,7 +269,7 @@ const openManager = async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in runningResults" :key="item.id" style="border-bottom: 1px solid #e2e8f0;">
+              <tr v-for="item in runningResults" :key="item.id" style="border-bottom: 1px solid var(--divider-color);">
                 <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
                 <td class="p-6">{{ item.type }}</td>
                 <td class="p-6" style="min-width: 220px;">{{ item.chainText || '-' }}</td>
@@ -295,7 +295,7 @@ const openManager = async () => {
         <div class="overflow-x-auto">
           <table class="w-full text-12" style="border-collapse: collapse;">
             <thead>
-              <tr style="border-bottom: 1px solid #cbd5e1;">
+              <tr style="border-bottom: 1px solid var(--divider-color);">
                 <th class="text-left p-6">时间</th>
                 <th class="text-left p-6">节点</th>
                 <th class="text-left p-6">类型</th>
@@ -307,7 +307,7 @@ const openManager = async () => {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="item in history" :key="item.id" style="border-bottom: 1px solid #e2e8f0;">
+              <tr v-for="item in history" :key="item.id" style="border-bottom: 1px solid var(--divider-color);">
                 <td class="p-6 whitespace-nowrap">{{ formatTime(item.time) }}</td>
                 <td class="p-6" style="min-width: 220px;">{{ item.tag }}</td>
                 <td class="p-6">{{ item.type }}</td>
@@ -373,9 +373,9 @@ const openManager = async () => {
       }
       const nodeCardStyle = (node) => {
         const selected = settings.value.selectedNodeTags.includes(node.tag)
-        if (selected) return 'border: 1px solid #2563eb; background: #eff6ff;'
-        if (node.chainInfo?.isChained) return 'border: 1px solid #99f6e4; background: #f0fdfa;'
-        return 'border: 1px solid #cbd5e1; background: #f8fafc;'
+        if (selected) return 'border: 1px solid var(--primary-color); background: color-mix(in srgb, var(--card-bg) 82%, var(--primary-color) 18%); color: var(--color);'
+        if (node.chainInfo?.isChained) return 'border: 1px solid var(--level-1-color); background: color-mix(in srgb, var(--card-bg) 88%, var(--level-1-color) 12%); color: var(--color);'
+        return 'border: 1px solid var(--divider-color); background: var(--card-bg); color: var(--color);'
       }
       const runTests = async () => {
         if (running.value) return

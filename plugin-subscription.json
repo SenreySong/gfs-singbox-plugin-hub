@@ -2,7 +2,7 @@
   {
     "id": "plugin-single-node-relay",
     "name": "指定节点中转",
-    "version": "v1.0.9",
+    "version": "v1.0.10",
     "group": "Extensions",
     "description": "为指定 sing-box 出站节点配置中转节点，支持清理持久化配置中当前不可见的失效中转规则。 作者：SenreySong",
     "tags": [
@@ -36,7 +36,7 @@
   {
     "id": "plugin-outbound-dns-resolver",
     "name": "出站 DNS 解析器",
-    "version": "v1.2.1",
+    "version": "v1.2.2",
     "group": "Extensions",
     "description": "按多条规则为 sing-box 出站写入 domain_resolver，并可为没有 DNS 的域名出站补默认 DNS。 作者：SenreySong",
     "tags": [
@@ -70,7 +70,7 @@
   {
     "id": "plugin-policy-group-manager",
     "name": "策略组自动整理",
-    "version": "v1.1.9",
+    "version": "v1.1.10",
     "group": "Extensions",
     "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未命中节点，并跳过隐藏和内部测速策略组。 作者：SenreySong",
     "tags": [
@@ -79,7 +79,7 @@
       "策略组"
     ],
     "type": "Http",
-    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/policy-group-v1.1.9/plugin-policy-group-manager.js",
+    "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/policy-group-v1.1.10/plugin-policy-group-manager.js",
     "path": "data/plugins/plugin-policy-group-manager.js",
     "triggers": [
       "on::manual",
@@ -104,7 +104,7 @@
   {
     "id": "plugin-singbox-beta-migrator",
     "name": "测试版核心配置迁移",
-    "version": "v1.0.10",
+    "version": "v1.0.11",
     "group": "Extensions",
     "description": "在使用 sing-box 测试版核心时，启动前自动转换 1.14 DNS/TUN/HTTP/ACME/Bridge 不兼容配置，并在跳过时恢复上次迁移前配置。 作者：SenreySong",
     "tags": [
@@ -138,7 +138,7 @@
   {
     "id": "plugin-tcp-speed-tester",
     "name": "TCP 延迟与测速",
-    "version": "v1.1.6",
+    "version": "v1.1.7",
     "group": "Extensions",
     "description": "选择节点通过当前运行核心执行 TCP 延迟与流式下载测速，可显式开启认证测速入口，按节点路由且不新增可见策略组。 作者：SenreySong",
     "tags": [

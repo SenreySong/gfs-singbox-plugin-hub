@@ -342,7 +342,7 @@ const openManager = async () => {
             v-for="(rule, index) in rules"
             :key="rule.id"
             class="grid items-center gap-8 rounded-4 p-8"
-            style="grid-template-columns: 70px minmax(120px, 1fr) 150px minmax(140px, 1fr) minmax(120px, 160px) 136px; border: 1px solid #cbd5e1; background: #f8fafc;"
+            style="grid-template-columns: 70px minmax(120px, 1fr) 150px minmax(140px, 1fr) minmax(120px, 160px) 136px; border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);"
           >
             <Switch v-model="rule.enabled">启用</Switch>
             <Input v-model="rule.name" placeholder="规则名称" allow-paste />

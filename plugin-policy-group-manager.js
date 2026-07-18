@@ -1,6 +1,6 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
-const PLUGIN_SOURCE_VERSION = 'v1.1.9'
+const PLUGIN_SOURCE_VERSION = 'v1.1.10'
 const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
 const DEFAULT_GROUPS = [
   {
@@ -372,10 +372,10 @@ const openManager = async () => {
 
   const component = {
     template: `
-    <div class="flex flex-col gap-8 pr-8" style="color: #334155;">
+    <div class="flex flex-col gap-8 pr-8" style="color: var(--color);">
       <div class="flex items-center justify-between gap-8">
         <div class="flex items-center gap-8 min-w-0">
-          <div class="text-12" style="padding: 2px 6px; border: 1px solid #94a3b8; border-radius: 4px; background: #f8fafc; color: #334155; flex-shrink: 0;">
+          <div class="text-12" style="padding: 2px 6px; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--card-hover-bg); color: var(--card-color); flex-shrink: 0;">
             {{ pluginVersion }}
           </div>
           <div class="text-12 opacity-70 truncate" :title="previewText">{{ previewText }}</div>
@@ -387,7 +387,7 @@ const openManager = async () => {
       </div>
 
       <Card>
-        <div class="font-bold text-13 mb-8" style="color: #0f172a;">基础设置</div>
+        <div class="font-bold text-13 mb-8" style="color: var(--color);">基础设置</div>
         <div class="grid gap-10" style="grid-template-columns: repeat(2, minmax(220px, 1fr)); align-items: center;">
           <div class="flex items-center justify-between gap-8">
             <div class="text-12">启用插件</div>
@@ -437,14 +437,14 @@ const openManager = async () => {
             v-for="(group, index) in settings.groups"
             :key="group.id"
             class="rounded-4 p-8"
-            style="border: 1px solid #cbd5e1; background: #f8fafc;"
+            style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);"
           >
             <div class="flex items-center justify-between gap-8">
               <div class="flex items-center gap-8 min-w-0">
                 <div style="width: 72px; flex: 0 0 72px;">
                   <Switch v-model="group.enabled">启用</Switch>
                 </div>
-                <div class="font-bold text-13" style="color: #0f172a; flex-shrink: 0;">分组 {{ index + 1 }}</div>
+                <div class="font-bold text-13" style="color: var(--color); flex-shrink: 0;">分组 {{ index + 1 }}</div>
                 <div class="text-12 opacity-70 truncate" :title="group.tag || '未设置 tag'">
                   {{ group.tag || '未设置 tag' }}
                 </div>
@@ -455,7 +455,7 @@ const openManager = async () => {
                   title="上移"
                   aria-label="上移"
                   :disabled="index === 0"
-                  style="width: 30px; height: 30px; padding: 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; color: #334155; cursor: pointer; line-height: 1;"
+                  style="width: 30px; height: 30px; padding: 0; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--btn-normal-bg); color: var(--btn-normal-color); cursor: pointer; line-height: 1;"
                   @click="moveGroupUp(index)"
                 >↑</button>
                 <button
@@ -463,27 +463,27 @@ const openManager = async () => {
                   title="下移"
                   aria-label="下移"
                   :disabled="index === settings.groups.length - 1"
-                  style="width: 30px; height: 30px; padding: 0; border: 1px solid #cbd5e1; border-radius: 4px; background: #ffffff; color: #334155; cursor: pointer; line-height: 1;"
+                  style="width: 30px; height: 30px; padding: 0; border: 1px solid var(--divider-color); border-radius: 4px; background: var(--btn-normal-bg); color: var(--btn-normal-color); cursor: pointer; line-height: 1;"
                   @click="moveGroupDown(index)"
                 >↓</button>
                 <button
                   type="button"
-                  style="height: 30px; padding: 0 8px; border: 1px solid #fecaca; border-radius: 4px; background: #ffffff; color: #dc2626; cursor: pointer; white-space: nowrap;"
+                  style="height: 30px; padding: 0 8px; border: 1px solid var(--level-4-color); border-radius: 4px; background: var(--btn-normal-bg); color: var(--level-4-color); cursor: pointer; white-space: nowrap;"
                   @click="removeGroup(index)"
                 >删除</button>
               </div>
             </div>
             <div class="grid gap-8 mt-8" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
               <div class="min-w-0" style="grid-column: 1 / -1;">
-                <div class="text-11 mb-4" style="color: #64748b;">策略组 tag</div>
+                <div class="text-11 mb-4" style="color: var(--card-color);">策略组 tag</div>
                 <Input v-model="group.tag" placeholder="策略组 tag" allow-paste style="width: 100%;" />
               </div>
               <div class="min-w-0">
-                <div class="text-11 mb-4" style="color: #64748b;">主匹配正则</div>
+                <div class="text-11 mb-4" style="color: var(--card-color);">主匹配正则</div>
                 <Input v-model="group.pattern" placeholder="主匹配正则" allow-paste style="width: 100%;" />
               </div>
               <div class="min-w-0">
-                <div class="text-11 mb-4" style="color: #64748b;">额外条件</div>
+                <div class="text-11 mb-4" style="color: var(--card-color);">额外条件</div>
                 <Input v-model="group.extraPattern" placeholder="可留空" allow-paste style="width: 100%;" />
               </div>
             </div>
@@ -496,11 +496,11 @@ const openManager = async () => {
 
       <Card>
         <div class="flex items-center justify-between gap-8 mb-8">
-          <div class="font-bold text-13" style="color: #0f172a;">生成预览</div>
+          <div class="font-bold text-13" style="color: var(--color);">生成预览</div>
           <div class="text-12 opacity-70">{{ preview.groups.length }} 个策略组</div>
         </div>
         <div class="grid gap-8" style="grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));">
-          <div v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8" style="border: 1px solid #cbd5e1; background: #f8fafc;">
+          <div v-for="group in preview.groups" :key="group.tag" class="rounded-4 p-8" style="border: 1px solid var(--divider-color); background: var(--card-hover-bg); color: var(--color);">
             <div class="font-bold text-13">{{ group.tag }}</div>
             <div class="text-12 opacity-75">{{ group.count }} 个节点</div>
           </div>
