@@ -112,13 +112,13 @@ const CONVERSION_DEFINITIONS = [
     id: 'remote-ruleset-http-client',
     level: 'recommend',
     title: '远程规则集 HTTP 客户端迁移',
-    description: '把 rule_set.download_detour 迁移为 1.14 的 http_client。'
+    description: '把 rule_set.download_detour 迁移为 1.14 的 http_client；空 Direct 不能作为 detour，将省略。'
   },
   {
     id: 'remote-ruleset-default-http-client',
     level: 'recommend',
     title: '远程规则集默认 HTTP 客户端',
-    description: '为远程规则集显式配置 http_clients 与 route.default_http_client，消除 1.14 隐式默认客户端警告。'
+    description: '为远程规则集显式配置 http_clients 与 route.default_http_client；默认客户端不得 detour 到空 Direct。'
   },
   {
     id: 'bridge-preferred-by',
@@ -851,23 +851,77 @@ const fixDnsRuleCompatibility = (config, report) => {
   recordRecommend(report, 'dns-rule-compatibility', count)
 }
 
+const findOutboundByTag = (config, tag) => {
+  if (typeof tag !== 'string' || !tag.trim()) return undefined
+  return (config?.outbounds || []).find((outbound) => outbound?.tag === tag)
+}
+
+const isEmptyDirectOutbound = (outbound) => {
+  if (!outbound || outbound.type !== 'direct') return false
+  return Object.entries(outbound).every(([key, value]) => {
+    if (key === 'type' || key === 'tag') return true
+    return value === undefined || value === null || value === ''
+  })
+}
+
+const isForbiddenHttpDetour = (config, detour) => {
+  if (detour === undefined || detour === null) return false
+  if (typeof detour !== 'string' || !detour.trim()) return true
+  return isEmptyDirectOutbound(findOutboundByTag(config, detour))
+}
+
+const stripForbiddenHttpClientDetour = (config, httpClient) => {
+  if (!httpClient || typeof httpClient !== 'object') return false
+  if (!isForbiddenHttpDetour(config, httpClient.detour)) return false
+  delete httpClient.detour
+  return true
+}
+
+const pruneEmptyHttpClient = (holder) => {
+  const httpClient = holder?.http_client
+  if (!httpClient || typeof httpClient !== 'object') return
+  const keys = Object.keys(httpClient).filter((key) => {
+    return httpClient[key] !== undefined && httpClient[key] !== null && httpClient[key] !== ''
+  })
+  if (keys.length === 0) delete holder.http_client
+}
+
+const stripForbiddenUiDownloadDetour = (config) => {
+  const clashApi = config?.experimental?.clash_api
+  if (!clashApi || !isForbiddenHttpDetour(config, clashApi.external_ui_download_detour)) return false
+  clashApi.external_ui_download_detour = ''
+  return true
+}
+
 const migrateRemoteRuleSetHttpClient = (config, report) => {
   const ruleSets = config?.route?.rule_set || []
   if (!Array.isArray(ruleSets)) return
   let count = 0
   for (const ruleSet of ruleSets) {
     if (!ruleSet || typeof ruleSet !== 'object') continue
-    if (ruleSet.download_detour === undefined) continue
-    if (ruleSet.http_client === undefined) {
-      ruleSet.http_client = {
-        detour: ruleSet.download_detour
+    if (ruleSet.download_detour !== undefined) {
+      if (ruleSet.http_client === undefined) {
+        if (!isForbiddenHttpDetour(config, ruleSet.download_detour)) {
+          ruleSet.http_client = {
+            detour: ruleSet.download_detour
+          }
+        }
+        count += 1
+      } else if (stripForbiddenHttpClientDetour(config, ruleSet.http_client)) {
+        pruneEmptyHttpClient(ruleSet)
+        count += 1
+      } else {
+        recordSkipped(report, 'remote-ruleset-http-client', 1, `${ruleSet.tag || '未命名规则集'} 已存在 http_client`)
       }
-      count += 1
-    } else {
-      recordSkipped(report, 'remote-ruleset-http-client', 1, `${ruleSet.tag || '未命名规则集'} 已存在 http_client`)
+      delete ruleSet.download_detour
+      continue
     }
-    delete ruleSet.download_detour
+    if (stripForbiddenHttpClientDetour(config, ruleSet.http_client)) {
+      pruneEmptyHttpClient(ruleSet)
+      count += 1
+    }
   }
+  if (stripForbiddenUiDownloadDetour(config)) count += 1
   recordRecommend(report, 'remote-ruleset-http-client', count)
 }
 
@@ -877,7 +931,14 @@ const migrateRemoteRuleSetDefaultHttpClient = (config, report) => {
   })
   if (remoteRuleSets.length === 0) return
   if (!config.route) config.route = {}
-  if (config.route.default_http_client) return
+
+  if (config.route.default_http_client) {
+    const existing = findHttpClientByTag(config, config.route.default_http_client)
+    if (existing && stripForbiddenHttpClientDetour(config, existing)) {
+      recordRecommend(report, 'remote-ruleset-default-http-client', 1, '去掉空 Direct detour')
+    }
+    return
+  }
 
   const existingTag = findFirstHttpClientTag(config)
   const tag = existingTag || nextAvailableTag(config, 'rule-set-http-client')
@@ -890,24 +951,24 @@ const migrateRemoteRuleSetDefaultHttpClient = (config, report) => {
     }
     config.http_clients.push(client)
     count += 1
+  } else if (stripForbiddenHttpClientDetour(config, findHttpClientByTag(config, existingTag))) {
+    count += 1
   }
   config.route.default_http_client = tag
   count += 1
   const client = findHttpClientByTag(config, tag)
-  const note = client?.detour ? `使用 ${client.detour}` : `使用 ${tag}`
+  const note = client?.detour ? `使用 ${client.detour}` : `使用默认拨号`
   recordRecommend(report, 'remote-ruleset-default-http-client', count, note)
 }
 
 const buildDefaultRuleSetHttpClient = (config, remoteRuleSets) => {
   for (const ruleSet of remoteRuleSets) {
-    if (ruleSet?.http_client && typeof ruleSet.http_client === 'object') {
-      return clone(ruleSet.http_client)
-    }
+    if (!ruleSet?.http_client || typeof ruleSet.http_client !== 'object') continue
+    const client = clone(ruleSet.http_client)
+    stripForbiddenHttpClientDetour(config, client)
+    delete client.tag
+    if (client.detour || Object.keys(client).length > 0) return client
   }
-  const finalOutbound = typeof config?.route?.final === 'string' ? config.route.final : ''
-  if (finalOutbound) return { detour: finalOutbound }
-  const directOutbound = (config?.outbounds || []).find((outbound) => outbound?.type === 'direct' && outbound.tag)
-  if (directOutbound?.tag) return { detour: directOutbound.tag }
   return {}
 }
 
