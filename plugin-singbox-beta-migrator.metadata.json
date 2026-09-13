@@ -1,9 +1,9 @@
 {
   "id": "plugin-singbox-beta-migrator",
   "name": "测试版核心配置迁移",
-  "version": "v1.0.12",
+  "version": "v1.1.0",
   "group": "Extensions",
-  "description": "在使用 sing-box 测试版核心时，启动前自动转换 1.14 DNS/TUN/HTTP/ACME/Bridge 不兼容配置，并在跳过时恢复上次迁移前配置。 作者：SenreySong",
+  "description": "适配 sing-box 1.14/1.15 测试版核心配置；支持新版 TUN 协议栈迁移、缓存写缓冲和端点按需断开，并在跳过时恢复上次迁移前配置。 作者：SenreySong",
   "tags": [
     "实用工具",
     "功能扩展",

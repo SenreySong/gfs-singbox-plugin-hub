@@ -1,6 +1,9 @@
 const DATA_DIR = 'data/third/singbox-beta-migrator'
 const SETTINGS_FILE = DATA_DIR + '/settings.json'
 const STATE_FILE = DATA_DIR + '/state.json'
+const CACHE_BUFFER_SIZES = ['', '1MB', '4MB', '16MB']
+const CACHE_FLUSH_INTERVALS = ['', '5s', '30s', '1m', '5m']
+const ON_DEMAND_ENDPOINT_TYPES = ['wireguard', 'tailscale', 'openvpn-client', 'openconnect']
 
 const RUN_MODES = [
   '仅测试版核心,beta_only',
@@ -13,6 +16,7 @@ const DEFAULT_SETTINGS = {
   manualKernelVersion: '',
   notifyOnApply: true,
   recommendationToggles: {
+    tunStack: true,
     dnsCache: true,
     cacheFileStoreDns: true,
     directOverride: true,
@@ -33,15 +37,26 @@ const DEFAULT_SETTINGS = {
     dnsOptimistic: false,
     dnsTimeout: false,
     tunDnsMode: true,
-    icmpBridge: true
+    icmpBridge: true,
+    cacheFileBuffer: false,
+    endpointOnDemand: false
   },
   featureOptions: {
     tunDnsAddress: '',
     icmpBridgeTag: 'icmp-bridge',
-    icmpBridgeInterface: ''
+    icmpBridgeInterface: '',
+    cacheBufferSize: '',
+    cacheFlushInterval: '',
+    endpointOnDemandTags: ''
   }
 }
 const CONVERSION_DEFINITIONS = [
+  {
+    id: 'tun-stack',
+    level: 'recommend',
+    title: '迁移到新版 TUN 协议栈',
+    description: '从 1.15.0-alpha.3 起移除 TUN stack，使用 sing-tun 自有 TCP/IP 栈；旧核心保留原值。'
+  },
   {
     id: 'legacy-dns-server',
     level: 'force',
@@ -152,6 +167,16 @@ const CONVERSION_DEFINITIONS = [
   }
 ]
 const FEATURE_DEFINITIONS = [
+  {
+    id: 'cache-file-buffer',
+    title: '配置缓存文件写缓冲（1.15）',
+    description: '仅为已启用的 cache_file 补充所选缓冲大小和刷新间隔，已有字段优先；留空使用核心默认值。'
+  },
+  {
+    id: 'endpoint-on-demand',
+    title: '允许端点按需断开（1.15）',
+    description: '为所选 WireGuard、Tailscale、OpenVPN 客户端及 OpenConnect 端点补充 on_demand=true，保留已有设置。'
+  },
   {
     id: 'route-default-domain-resolver',
     title: '注入默认域名解析器',
@@ -274,7 +299,10 @@ const normalizeSettings = (settings) => ({
     ...(settings?.featureOptions || {}),
     tunDnsAddress: String(settings?.featureOptions?.tunDnsAddress || '').trim(),
     icmpBridgeTag: String(settings?.featureOptions?.icmpBridgeTag || DEFAULT_SETTINGS.featureOptions.icmpBridgeTag).trim() || DEFAULT_SETTINGS.featureOptions.icmpBridgeTag,
-    icmpBridgeInterface: String(settings?.featureOptions?.icmpBridgeInterface || '').trim()
+    icmpBridgeInterface: String(settings?.featureOptions?.icmpBridgeInterface || '').trim(),
+    cacheBufferSize: String(settings?.featureOptions?.cacheBufferSize || '').trim(),
+    cacheFlushInterval: String(settings?.featureOptions?.cacheFlushInterval || '').trim(),
+    endpointOnDemandTags: String(settings?.featureOptions?.endpointOnDemandTags || '').trim()
   }
 })
 
@@ -302,8 +330,12 @@ const onBeforeCoreStart = async (config) => {
     return await restoreConfigIfNeeded(config, settings, kernelInfo)
   }
 
-  const originalConfig = clone(config || {})
-  const migratedConfig = clone(config || {})
+  const migrationState = await readMigrationState()
+  // 重复启动时从原始配置重新生成，避免把上次注入结果当作用户配置。
+  const sourceConfig = migrationState?.originalConfig && migrationState?.migratedConfig &&
+    isSameConfig(config, migrationState.migratedConfig) ? migrationState.originalConfig : config
+  const originalConfig = clone(sourceConfig || {})
+  const migratedConfig = clone(sourceConfig || {})
   const report = applyMigrations(migratedConfig, settings, { mutate: true, kernelInfo })
   getState().preview.value = report
   if (report.totalApplied > 0) {
@@ -368,6 +400,11 @@ const applyMigrations = (config, settings, options = {}) => {
   migrateLegacyDnsServers(workingConfig, report)
   migrateOutboundDnsRules(workingConfig, report)
   migrateTunRouteFields(workingConfig, report)
+  if (settings.recommendationToggles.tunStack) {
+    migrateTunStack(workingConfig, report)
+  } else {
+    recordSkipped(report, 'tun-stack')
+  }
 
   if (settings.recommendationToggles.dnsCache) {
     migrateIndependentDnsCache(workingConfig, report)
@@ -672,6 +709,19 @@ const mergeArrayField = (target, nextKey, oldKeys) => {
   target[nextKey] = unique(toArray(target[nextKey]).concat(values))
   oldKeys.forEach((key) => delete target[key])
   return 1
+}
+
+const migrateTunStack = (config, report) => {
+  const inbounds = (config?.inbounds || []).filter((inbound) => inbound?.type === 'tun' && inbound.stack !== undefined)
+  if (inbounds.length === 0) return
+  if (!supportsSingBox115(report.kernel.version, 3)) {
+    recordSkipped(report, 'tun-stack', inbounds.length, '需要 1.15.0-alpha.3 或更新核心；版本未知时保留 stack。')
+    return
+  }
+  for (const inbound of inbounds) {
+    delete inbound.stack
+  }
+  recordRecommend(report, 'tun-stack', inbounds.length, '已移除 stack，使用 sing-tun 自有 TCP/IP 栈。')
 }
 
 const migrateIndependentDnsCache = (config, report) => {
@@ -1079,6 +1129,12 @@ const detectInboundLegacyFields = (config, report, settings) => {
 
 const applyFeatureInjections = (config, report, settings) => {
   settings = normalizeSettings(settings)
+  if (settings.featureToggles.cacheFileBuffer) {
+    injectCacheFileBuffer(config, report, settings)
+  }
+  if (settings.featureToggles.endpointOnDemand) {
+    injectEndpointOnDemand(config, report, settings)
+  }
   if (settings.featureToggles.routeDefaultDomainResolver) {
     injectRouteDefaultDomainResolver(config, report)
   } else {
@@ -1104,6 +1160,70 @@ const applyFeatureInjections = (config, report, settings) => {
   } else {
     recordSkipped(report, 'icmp-bridge')
   }
+}
+
+const injectCacheFileBuffer = (config, report, settings) => {
+  const id = 'cache-file-buffer'
+  if (!supportsSingBox115(report.kernel.version)) {
+    recordSkipped(report, id, 1, '需要 1.15.0-alpha.1 或更新核心；版本未知时不注入。')
+    return
+  }
+  const cacheFile = config?.experimental?.cache_file
+  if (!cacheFile || cacheFile.enabled !== true) {
+    recordSkipped(report, id, 1, '缓存文件未启用，不自动开启持久化。')
+    return
+  }
+  const fields = [
+    ['buffer_size', settings.featureOptions.cacheBufferSize, CACHE_BUFFER_SIZES],
+    ['flush_interval', settings.featureOptions.cacheFlushInterval, CACHE_FLUSH_INTERVALS]
+  ]
+  let count = 0
+  for (const [key, value, allowedValues] of fields) {
+    if (!value) continue
+    if (cacheFile[key] !== undefined) {
+      recordSkipped(report, id, 1, `保留已有 ${key}。`)
+      continue
+    }
+    if (!allowedValues.includes(value)) {
+      recordSkipped(report, id, 1, `${key} 设置不在支持的选项内，请在面板重新选择。`)
+      continue
+    }
+    cacheFile[key] = value
+    count += 1
+  }
+  recordInjected(report, id, count)
+}
+
+const injectEndpointOnDemand = (config, report, settings) => {
+  const id = 'endpoint-on-demand'
+  if (!supportsSingBox115(report.kernel.version)) {
+    recordSkipped(report, id, 1, '需要 1.15.0-alpha.1 或更新核心；版本未知时不注入。')
+    return
+  }
+  const tags = new Set(splitCsv(settings.featureOptions.endpointOnDemandTags))
+  const endpoints = Array.isArray(config?.endpoints) ? config.endpoints : []
+  const matchedTags = new Set()
+  let count = 0
+  for (const endpoint of endpoints) {
+    if (!endpoint || (tags.size > 0 && !tags.has(endpoint.tag))) continue
+    if (!ON_DEMAND_ENDPOINT_TYPES.includes(endpoint.type)) continue
+    matchedTags.add(endpoint.tag)
+    if (endpoint.on_demand !== undefined) {
+      recordSkipped(report, id, 1, `端点 ${endpoint.tag || endpoint.type} 已有 on_demand，保留原值。`)
+      continue
+    }
+    endpoint.on_demand = true
+    count += 1
+  }
+  for (const tag of tags) {
+    if (!matchedTags.has(tag)) {
+      recordSkipped(report, id, 1, `未找到支持 on_demand 的端点：${tag}。`)
+    }
+  }
+  if (tags.size === 0 && matchedTags.size === 0) {
+    recordSkipped(report, id, 1, '未找到支持 on_demand 的端点。')
+  }
+  recordInjected(report, id, count)
 }
 
 const injectRouteDefaultDomainResolver = (config, report) => {
@@ -1289,7 +1409,7 @@ const openManager = async () => {
           <div class="font-bold text-13">检测到的核心</div>
           <div class="text-12 opacity-75" style="word-break: break-word;">{{ kernelText }}</div>
           <div class="font-bold text-13">手动核心版本</div>
-          <Input v-model="settings.manualKernelVersion" placeholder="例如 1.14.0-alpha.33，可空" allow-paste />
+          <Input v-model="settings.manualKernelVersion" placeholder="例如 1.15.0-alpha.3，可空" allow-paste />
           <div class="font-bold text-13">检测来源</div>
           <div class="text-12 opacity-75" style="word-break: break-word;">{{ kernelSourceText }}</div>
         </div>
@@ -1324,7 +1444,18 @@ const openManager = async () => {
 
       <Card>
         <div class="font-bold text-14 mb-8">功能注入</div>
+        <div class="text-12 opacity-75 mb-8">1.15 新功能默认不注入。缓存写缓冲默认 1MB，定时刷新默认关闭；已有配置优先。Android auto_redirect 需要图形客户端 root 服务或 root shell，并启用 auto_route；插件保留 auto_redirect 和 auto_redirect_tproxy_mark，不自动开启或覆盖平台默认标记。</div>
         <div class="grid items-center gap-8 mb-8" style="grid-template-columns: 150px minmax(220px, 1fr);">
+          <div class="font-bold text-13">缓存写缓冲大小</div>
+          <select v-model="settings.featureOptions.cacheBufferSize" class="gfs-native-input">
+            <option v-for="value in cacheBufferSizes" :key="value" :value="value">{{ value || '不注入（核心默认 1MB）' }}</option>
+          </select>
+          <div class="font-bold text-13">缓存定时刷新</div>
+          <select v-model="settings.featureOptions.cacheFlushInterval" class="gfs-native-input">
+            <option v-for="value in cacheFlushIntervals" :key="value" :value="value">{{ value || '不注入（核心默认关闭）' }}</option>
+          </select>
+          <div class="font-bold text-13">按需断开端点</div>
+          <Input v-model="settings.featureOptions.endpointOnDemandTags" placeholder="端点 tag，逗号分隔；留空匹配所有支持的端点" allow-paste />
           <div class="font-bold text-13">TUN DNS 地址</div>
           <Input v-model="settings.featureOptions.tunDnsAddress" placeholder="例如 172.18.0.2,fdfe:dcba:9876::2，可空" allow-paste />
           <div class="font-bold text-13">ICMP Bridge Tag</div>
@@ -1358,8 +1489,8 @@ const openManager = async () => {
           </div>
           <div>
             <div class="font-bold text-13 mb-4">跳过 / 需要手动处理</div>
-            <div v-for="item in skippedReportItems" :key="item.id" class="text-12 leading-6">
-              {{ item.title }}：{{ item.count }} 项
+            <div v-for="(item, index) in skippedReportItems" :key="index" class="text-12 leading-6">
+              {{ item.title }}：{{ item.count }} 项<span v-if="item.note">，{{ item.note }}</span>
             </div>
             <div v-if="skippedReportItems.length === 0" class="text-12 opacity-70">无</div>
           </div>
@@ -1409,6 +1540,8 @@ const openManager = async () => {
         preview,
         runtimeConfig,
         runModes: RUN_MODES,
+        cacheBufferSizes: CACHE_BUFFER_SIZES,
+        cacheFlushIntervals: CACHE_FLUSH_INTERVALS,
         forceItems: CONVERSION_DEFINITIONS.filter((item) => item.level === 'force'),
         recommendItems: CONVERSION_DEFINITIONS.filter((item) => item.level === 'recommend').map((item) => ({
           ...item,
@@ -1688,6 +1821,16 @@ const isIcmpBridgeSupported = (version) => {
   return parsed.preReleaseNumber >= 41
 }
 
+const supportsSingBox115 = (version, minimumAlpha = 1) => {
+  const parsed = parseSingBoxVersionInfo(version)
+  if (!parsed) return false
+  if (parsed.major !== 1) return parsed.major > 1
+  if (parsed.minor !== 15) return parsed.minor > 15
+  if (parsed.patch > 0 || !parsed.preRelease) return true
+  if (parsed.preRelease === 'alpha') return parsed.preReleaseNumber >= minimumAlpha
+  return ['beta', 'rc'].includes(parsed.preRelease)
+}
+
 const parseSingBoxVersionInfo = (version) => {
   const matched = String(version || '').match(/(\d+)\.(\d+)\.(\d+)(?:-([a-z]+)\.?(\d+)?)?/i)
   if (!matched) return null
@@ -1701,6 +1844,9 @@ const parseSingBoxVersionInfo = (version) => {
 }
 
 const getToggleKey = (id) => ({
+  'tun-stack': 'tunStack',
+  'cache-file-buffer': 'cacheFileBuffer',
+  'endpoint-on-demand': 'endpointOnDemand',
   'dns-cache': 'dnsCache',
   'cache-file-store-dns': 'cacheFileStoreDns',
   'direct-override': 'directOverride',
@@ -1727,10 +1873,9 @@ const getAppliedReportItems = (report) => {
 }
 
 const getReportCount = (report, id) => {
-  const item = getAppliedReportItems(report)
+  return getAppliedReportItems(report)
     .concat(toArray(report?.skipped))
-    .find((entry) => entry?.id === id)
-  return item?.count || 0
+    .reduce((count, entry) => count + (entry?.id === id ? entry.count || 0 : 0), 0)
 }
 
 const recordForce = (report, id, count, note = '') => recordReportItem(report.force, id, count, note)
