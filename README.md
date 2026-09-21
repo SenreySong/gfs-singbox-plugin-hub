@@ -82,8 +82,11 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 
 - 在启动核心前处理最终生成配置，用于适配 sing-box 测试版核心的新配置要求。
 - 处理 1.14 相关 DNS/TUN/HTTP/ACME 配置迁移。
-- 适配 1.15 测试版新增配置，当前核对基线为 `1.15.0-alpha.3`（2026-09-14 核对官方发布记录）。
+- 适配 1.15 测试版新增配置，当前核对基线为 `1.15.0-alpha.6`（2026-09-21 核对官方发布记录及该标签源码）。
 - 默认推荐移除 TUN `stack`，使用新版 TCP/IP 栈；仅在 `1.15.0-alpha.3` 及更新核心执行，`alpha.1` / `alpha.2`、1.14 和未知版本保留原值，可关闭该推荐开关。
+- 可选启用 Linux TUN `multi_queue`，默认关闭；仅在 `1.15.0-alpha.3` 及更新核心、应用报告的平台为 Linux 且 TUN 未使用旧 `stack` 时补充 `true`。保留已有 `false` / `true`，macOS、Windows、未知平台或版本跳过并说明原因；关闭 TUN 栈迁移且保留旧栈时也跳过。
+- 从 `1.15.0-alpha.5` 起，将 Tailcat 入站和出站纳入现有默认域名解析器注入：即使没有 `server` 字段，仍按核心的 DERP 拨号要求处理。复用已有“注入默认域名解析器”开关，只使用明确的 `dns.final` 或唯一带 tag 的 DNS 服务器，保留已有解析器；不能确定解析器时提示手动配置。
+- 检查 Tailcat 必填密钥字段、DERP 来源缺失及互斥项（自定义 `derp_servers` 不能同时使用 `derp_map_url`、`derp_region` 或 `http_client`），并检查 DERP `verify_client_inbound` 引用。低于 `alpha.5` 或版本未知时提示不支持，保留原配置；不生成 Tailcat 节点、密钥或校验列表，不把新协议转换为 Tailscale 端点，也不向 Tailcat 注入端点专用的 `on_demand`。`verify_client_key` 等已有校验字段原样保留。
 - 可选配置缓存文件 `buffer_size` / `flush_interval`，仅为已启用的 `experimental.cache_file` 补充缺失字段，保留路径、标识、缓存内容开关及已有缓冲设置。默认关闭注入；开启后需选择参数，留空不写入（核心默认缓冲为 `1MB`，定时刷新默认关闭）。
 - 可选为 WireGuard、Tailscale、OpenVPN 客户端（`openvpn-client`）和 OpenConnect 端点补充 `on_demand=true`，允许必要时断开；默认关闭，支持按端点 tag 筛选，留空匹配所有支持类型，已有 `false` / `true` 均保留，不处理 OpenVPN 服务端或普通出站。
 - 缓存写缓冲和端点按需断开仅在 `1.15.0-alpha.1` 及更新核心注入；旧版本或未知版本跳过并展示原因，手动版本应与实际核心一致。“总是启用”不绕过新功能的版本判断。
@@ -97,10 +100,13 @@ https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/main/plugin-
 - 重复启动的输入若与上次迁移结果完全一致，会从保存的原始配置重新迁移，使功能开关关闭和核心版本切换生效；输入不同则以当前配置为准。
 - 核心运行中可查看 `data/sing-box/config.json` 的完整运行时配置，方便确认转换效果。
 
-1.15 更新后，先在插件中心打开迁移面板查看检测到的核心版本和预览结果，再按需开启缓存写缓冲或端点按需断开并保存；下次核心启动时应用。插件默认仅处理测试版核心，正式版需主动选择“总是启用”。回退到旧核心时会按检测版本保留原始 TUN `stack`，不再注入 1.15 新字段；模板本身写入的新字段仍由模板维护。
+1.15 更新后，先在插件中心打开迁移面板查看检测到的核心版本和预览结果，再按需开启 Linux TUN 多队列、缓存写缓冲或端点按需断开并保存；下次核心启动时应用。插件默认仅处理测试版核心，正式版需主动选择“总是启用”。回退到旧核心时会按检测版本保留原始 TUN `stack`，不再注入 1.15 新字段；模板本身写入的新字段仍由模板维护。
 
 官方依据：
 
+- [1.15.0-alpha.6 发布说明](https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.6)与 [alpha.5 的 Tailcat 支持](https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.5)。alpha.4 和 alpha.6 的发布说明没有列出新增配置功能。
+- [Tailcat 入站](https://sing-box.sagernet.org/configuration/inbound/tailcat/)、[Tailcat 出站](https://sing-box.sagernet.org/configuration/outbound/tailcat/)和 [DERP 客户端校验](https://sing-box.sagernet.org/configuration/service/derp/#verify_client_inbound)；DERP 来源互斥及解析器需求同时核对 [alpha.6 源码](https://github.com/SagerNet/sing-box/tree/v1.15.0-alpha.6/protocol/tailscale)。
+- [TUN 多队列](https://sing-box.sagernet.org/configuration/inbound/tun/#multi_queue)在 alpha.3 已存在，本次补齐插件此前未提供的可选处理。
 - [1.15.0-alpha.3 发布说明](https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.3)与 [TUN 栈迁移](https://sing-box.sagernet.org/migration/#migrate-tun-stack)。
 - [1.15.0-alpha.1 发布说明](https://github.com/SagerNet/sing-box/releases/tag/v1.15.0-alpha.1)与[缓存文件](https://sing-box.sagernet.org/configuration/experimental/cache-file/)。
 - [WireGuard](https://sing-box.sagernet.org/configuration/endpoint/wireguard/#on_demand)、[Tailscale](https://sing-box.sagernet.org/configuration/endpoint/tailscale/#on_demand)、[OpenVPN 客户端](https://sing-box.sagernet.org/configuration/endpoint/openvpn-client/#on_demand)、[OpenConnect](https://sing-box.sagernet.org/configuration/endpoint/openconnect/#on_demand) 和 [TUN 自动重定向](https://sing-box.sagernet.org/configuration/inbound/tun/#auto_redirect)。

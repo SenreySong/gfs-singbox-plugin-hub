@@ -39,7 +39,8 @@ const DEFAULT_SETTINGS = {
     tunDnsMode: true,
     icmpBridge: true,
     cacheFileBuffer: false,
-    endpointOnDemand: false
+    endpointOnDemand: false,
+    tunMultiQueue: false
   },
   featureOptions: {
     tunDnsAddress: '',
@@ -51,6 +52,12 @@ const DEFAULT_SETTINGS = {
   }
 }
 const CONVERSION_DEFINITIONS = [
+  {
+    id: 'tailcat-compatibility',
+    level: 'force',
+    title: 'Tailcat / DERP 配置检查（1.15）',
+    description: '检查 alpha.5 起的 Tailcat 与 DERP 校验字段，提示版本、必填项和引用问题；保留密钥及校验规则，不自动创建节点。'
+  },
   {
     id: 'tun-stack',
     level: 'recommend',
@@ -168,6 +175,11 @@ const CONVERSION_DEFINITIONS = [
 ]
 const FEATURE_DEFINITIONS = [
   {
+    id: 'tun-multi-queue',
+    title: '启用 Linux TUN 多队列（1.15）',
+    description: '仅在 Linux、alpha.3 及更新核心且使用新版协议栈时补充 multi_queue=true；默认关闭，保留已有设置。'
+  },
+  {
     id: 'cache-file-buffer',
     title: '配置缓存文件写缓冲（1.15）',
     description: '仅为已启用的 cache_file 补充所选缓冲大小和刷新间隔，已有字段优先；留空使用核心默认值。'
@@ -180,7 +192,7 @@ const FEATURE_DEFINITIONS = [
   {
     id: 'route-default-domain-resolver',
     title: '注入默认域名解析器',
-    description: '当存在域名类出站且 route.default_domain_resolver 缺失时，按 1.14 新 DNS 处理注入默认解析器。'
+    description: '域名类出站或 Tailcat 入站／出站缺少解析器时，使用明确的 DNS 默认服务器补充 route.default_domain_resolver；Tailcat 需要 alpha.5 及更新核心。'
   },
   {
     id: 'dns-optimistic',
@@ -469,6 +481,7 @@ const applyMigrations = (config, settings, options = {}) => {
   detectHysteriaDeprecatedFields(workingConfig, report, settings)
   detectInboundLegacyFields(workingConfig, report, settings)
   applyFeatureInjections(workingConfig, report, settings)
+  detectTailcatCompatibility(workingConfig, report)
 
   report.totalApplied = getAppliedReportItems(report).reduce((total, item) => total + item.count, 0)
   return report
@@ -1129,6 +1142,9 @@ const detectInboundLegacyFields = (config, report, settings) => {
 
 const applyFeatureInjections = (config, report, settings) => {
   settings = normalizeSettings(settings)
+  if (settings.featureToggles.tunMultiQueue) {
+    injectTunMultiQueue(config, report)
+  }
   if (settings.featureToggles.cacheFileBuffer) {
     injectCacheFileBuffer(config, report, settings)
   }
@@ -1159,6 +1175,75 @@ const applyFeatureInjections = (config, report, settings) => {
     injectIcmpBridge(config, report, settings)
   } else {
     recordSkipped(report, 'icmp-bridge')
+  }
+}
+
+const injectTunMultiQueue = (config, report) => {
+  const id = 'tun-multi-queue'
+  const inbounds = toArray(config?.inbounds).filter((inbound) => inbound?.type === 'tun' && inbound.multi_queue === undefined)
+  if (inbounds.length === 0) return
+  if (!supportsSingBox115(report?.kernel?.version, 3)) {
+    recordSkipped(report, id, inbounds.length, '需要 1.15.0-alpha.3 或更新核心；版本未知时不注入。')
+    return
+  }
+  if (report?.kernel?.platform !== 'linux') {
+    recordSkipped(report, id, inbounds.length, '仅支持 Linux；当前平台不是 Linux 或平台未知。')
+    return
+  }
+  for (const inbound of inbounds) {
+    if (inbound.stack) {
+      recordSkipped(report, id, 1, '需要新版 TUN 协议栈；请先启用 TUN stack 迁移或从模板移除 stack。')
+      continue
+    }
+    inbound.multi_queue = true
+    recordInjected(report, id, 1)
+  }
+}
+
+const getTailcatEntries = (config) => {
+  return ['inbounds', 'outbounds'].flatMap((section) => toArray(config?.[section])
+    .map((value, index) => ({ value, section, label: `${section}[${index}]` }))
+    .filter((entry) => entry.value?.type === 'tailcat'))
+}
+
+const detectTailcatCompatibility = (config, report) => {
+  const id = 'tailcat-compatibility'
+  const entries = getTailcatEntries(config)
+  const derpServices = toArray(config?.services).filter((service) => service?.type === 'derp' &&
+    (service.verify_client_inbound !== undefined || service.verify_client_key !== undefined))
+  if (entries.length + derpServices.length === 0) return
+  if (!supportsSingBox115(report?.kernel?.version, 5)) {
+    recordSkipped(report, id, entries.length + derpServices.length, 'Tailcat 和 DERP 新校验字段需要 1.15.0-alpha.5 或更新核心；当前版本过旧或未知，保留配置，请核对核心。')
+    return
+  }
+  for (const { value, section, label } of entries) {
+    const requiredFields = section === 'inbounds' ? ['private_key'] : ['server_public_key', 'server_disco_key']
+    const missingFields = requiredFields.filter((key) => typeof value[key] !== 'string' || !value[key].trim())
+    if (missingFields.length > 0) {
+      recordSkipped(report, id, 1, `${label} 缺少 ${missingFields.join('、')}，请在模板中补全。`)
+    }
+    const servers = toArray(value.derp_servers ?? [])
+    if (servers.length > 0) {
+      if (value.derp_map_url || value.derp_region || value.http_client != null) {
+        recordSkipped(report, id, 1, `${label} 的 derp_servers 与 derp_map_url、derp_region 或 http_client 冲突，请选择一种 DERP 来源。`)
+      }
+      if (servers.some((server) => typeof server === 'string' ? !server.trim() : !server?.host)) {
+        recordSkipped(report, id, 1, `${label} 的 derp_servers 存在缺少 host 的条目。`)
+      }
+    } else if (!Number.isInteger(value.derp_region) || value.derp_region <= 0) {
+      recordSkipped(report, id, 1, `${label} 需要正整数 derp_region 或非空 derp_servers。`)
+    }
+    if (value.domain_resolver === undefined && config?.route?.default_domain_resolver === undefined &&
+      toArray(config?.dns?.servers).length > 1) {
+      recordSkipped(report, id, 1, `${label} 在多 DNS 服务器配置下缺少 domain_resolver 或 route.default_domain_resolver，请指定可用的 DNS 服务器。`)
+    }
+  }
+  const inboundTags = new Set(entries.filter((entry) => entry.section === 'inbounds').map((entry) => entry.value.tag).filter(Boolean))
+  for (const service of derpServices) {
+    const missing = toArray(service.verify_client_inbound ?? []).filter((tag) => !inboundTags.has(tag))
+    if (missing.length > 0) {
+      recordSkipped(report, id, missing.length, 'DERP verify_client_inbound 引用了不存在的 Tailcat 入站，请核对模板中的入站 tag；校验规则保持原样。')
+    }
   }
 }
 
@@ -1227,7 +1312,9 @@ const injectEndpointOnDemand = (config, report, settings) => {
 }
 
 const injectRouteDefaultDomainResolver = (config, report) => {
-  if (!hasDomainOutboundWithoutResolver(config)) return
+  const tailcatNeedsResolver = supportsSingBox115(report?.kernel?.version, 5) &&
+    getTailcatEntries(config).some((entry) => entry.value.domain_resolver === undefined)
+  if (!hasDomainOutboundWithoutResolver(config) && !tailcatNeedsResolver) return
   if (!config.route) config.route = {}
   if (config.route.default_domain_resolver !== undefined) return
 
@@ -1409,7 +1496,7 @@ const openManager = async () => {
           <div class="font-bold text-13">检测到的核心</div>
           <div class="text-12 opacity-75" style="word-break: break-word;">{{ kernelText }}</div>
           <div class="font-bold text-13">手动核心版本</div>
-          <Input v-model="settings.manualKernelVersion" placeholder="例如 1.15.0-alpha.3，可空" allow-paste />
+          <Input v-model="settings.manualKernelVersion" placeholder="例如 1.15.0-alpha.6，可空" allow-paste />
           <div class="font-bold text-13">检测来源</div>
           <div class="text-12 opacity-75" style="word-break: break-word;">{{ kernelSourceText }}</div>
         </div>
@@ -1444,7 +1531,8 @@ const openManager = async () => {
 
       <Card>
         <div class="font-bold text-14 mb-8">功能注入</div>
-        <div class="text-12 opacity-75 mb-8">1.15 新功能默认不注入。缓存写缓冲默认 1MB，定时刷新默认关闭；已有配置优先。Android auto_redirect 需要图形客户端 root 服务或 root shell，并启用 auto_route；插件保留 auto_redirect 和 auto_redirect_tproxy_mark，不自动开启或覆盖平台默认标记。</div>
+        <div class="text-12 opacity-75 mb-8">已核对 1.15.0-alpha.6。TUN 多队列仅在 Linux 和新版协议栈上注入；macOS、Windows 与未知平台跳过。Tailcat 入站／出站从 alpha.5 起纳入默认解析器检测，密钥、DERP 来源及客户端校验配置由模板提供。</div>
+        <div class="text-12 opacity-75 mb-8">多队列、缓存写缓冲和端点按需断开默认不注入。缓存写缓冲默认 1MB，定时刷新默认关闭；已有配置优先。Android auto_redirect 需要图形客户端 root 服务或 root shell，并启用 auto_route；插件保留 auto_redirect 和 auto_redirect_tproxy_mark，不自动开启或覆盖平台默认标记。</div>
         <div class="grid items-center gap-8 mb-8" style="grid-template-columns: 150px minmax(220px, 1fr);">
           <div class="font-bold text-13">缓存写缓冲大小</div>
           <select v-model="settings.featureOptions.cacheBufferSize" class="gfs-native-input">
@@ -1639,11 +1727,21 @@ const getCurrentProfile = () => {
   return profiles.find((profile) => profile.id === currentProfileId) || profilesStore.currentProfile || profiles[0]
 }
 
+const getRuntimePlatform = () => {
+  try {
+    return String(Plugins.useEnvStore()?.env?.os || '').trim().toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 const getKernelInfo = async (settings = {}) => {
+  const platform = getRuntimePlatform()
   const manualVersion = String(settings.manualKernelVersion || '').trim()
   if (manualVersion) {
     return {
       version: manualVersion,
+      platform,
       isPrerelease: isPrereleaseVersion(manualVersion),
       source: '手动填写'
     }
@@ -1653,6 +1751,7 @@ const getKernelInfo = async (settings = {}) => {
   if (realVersion) {
     return {
       version: realVersion,
+      platform,
       isPrerelease: isPrereleaseVersion(realVersion),
       source: '核心执行结果'
     }
@@ -1667,6 +1766,7 @@ const getKernelInfo = async (settings = {}) => {
   const matched = findKernelVersionCandidate(sources)
   return {
     version: matched.version,
+    platform,
     isPrerelease: isPrereleaseVersion(matched.version),
     source: matched.source
   }
@@ -1845,6 +1945,7 @@ const parseSingBoxVersionInfo = (version) => {
 
 const getToggleKey = (id) => ({
   'tun-stack': 'tunStack',
+  'tun-multi-queue': 'tunMultiQueue',
   'cache-file-buffer': 'cacheFileBuffer',
   'endpoint-on-demand': 'endpointOnDemand',
   'dns-cache': 'dnsCache',
