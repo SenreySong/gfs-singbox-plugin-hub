@@ -1,6 +1,6 @@
 const DATA_DIR = 'data/third/policy-group-manager'
 const CONFIG_FILE = DATA_DIR + '/settings.json'
-const PLUGIN_SOURCE_VERSION = 'v1.1.10'
+const PLUGIN_SOURCE_VERSION = 'v1.1.11'
 const DEFAULT_OTHER_GROUP_TAG = '🌐 Other Group'
 const DEFAULT_GROUPS = [
   {
@@ -228,9 +228,9 @@ const buildGroupSelectors = (nodes, groupRules, settings) => {
   for (const node of nodes) {
     for (const group of groupRules) {
       if (!matchGroupPattern(node.tag, group)) continue
-      matchedNodeTags.add(node.tag)
       if (!matchGroupExtraPattern(node.tag, group)) continue
       groupedNodeTags.get(group.tag).push(node.tag)
+      matchedNodeTags.add(node.tag)
     }
   }
 
@@ -428,7 +428,7 @@ const openManager = async () => {
         <div class="flex items-center justify-between gap-8 mb-8">
           <div class="min-w-0">
             <div class="font-bold text-13">分组规则</div>
-            <div class="text-12 opacity-70">节点会加入所有命中的分组；命中任一主规则后不会进入 Other 组；额外条件只决定是否进入对应策略组。</div>
+            <div class="text-12 opacity-70">节点通过主规则和额外条件并实际加入分组后才算命中；可同时加入多个分组；未加入任何分组的节点会进入已启用的 Other 组。</div>
           </div>
           <Button @click="addGroup">新增分组</Button>
         </div>

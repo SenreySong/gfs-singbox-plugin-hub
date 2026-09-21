@@ -1,16 +1,16 @@
 {
   "id": "plugin-policy-group-manager",
   "name": "策略组自动整理",
-  "version": "v1.1.10",
+  "version": "v1.1.11",
   "group": "Extensions",
-  "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未命中节点，并跳过隐藏和内部测速策略组。 作者：SenreySong",
+  "description": "按可配置分组规则自动生成策略组，支持 Other 组收纳未实际进入任何分组的节点，并跳过隐藏和内部测速策略组。 作者：SenreySong",
   "tags": [
     "实用工具",
     "功能扩展",
     "策略组"
   ],
   "type": "Http",
-  "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/policy-group-v1.1.10/plugin-policy-group-manager.js",
+  "url": "https://raw.githubusercontent.com/SenreySong/gfs-singbox-plugin-hub/policy-group-v1.1.11/plugin-policy-group-manager.js",
   "path": "data/plugins/plugin-policy-group-manager.js",
   "triggers": [
     "on::manual",
